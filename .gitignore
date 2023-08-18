@@ -1,3 +1,9 @@
+
+## project specific files
+
+# key information
+/keys/
+
 # History files
 .Rhistory
 .Rapp.history

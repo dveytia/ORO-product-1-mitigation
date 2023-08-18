@@ -1,0 +1,26 @@
+---
+title: "0_test-web-scraping"
+author: "Devi Veytia"
+date: "2023-08-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set up
+
+```{r}
+library(twitteR)
+
+
+client_key <- readLines(here::here("keys/client_key.txt"))
+consumer_key <- readLines(here::here("keys/consumer_key.txt"))
+access_token <- readLines(here::here("keys/access_key.txt"))
+
+
+setup_twitter_oauth(consumer_key[1], consumer_key[2], access_token[1], access_token[2])
+setup_twitter_oauth(consumer_key[1], consumer_key[2])
+
+```
