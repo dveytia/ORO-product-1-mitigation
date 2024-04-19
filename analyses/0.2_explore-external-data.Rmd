@@ -1,0 +1,55 @@
+---
+title: "0.2_explore-external-data"
+author: "Devi Veytia"
+date: "2024-04-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load libraries}
+library(dplyr)
+library(ggplot2)
+```
+
+# Marine energy
+
+```{r load from databases and deduplicate}
+# df1 <- readxl::read_excel(here::here("data/raw-data/external/PRIMRE-marine-energy-projects-database.xlsx"),sheet = "Projects")
+# df2 <- readxl::read_excel(here::here("data/raw-data/external/Tethys-pnnl-marine-energy-metadata.xlsx"),sheet = "Projects")
+# df <- rbind(df1, df2)
+# 
+# # Deduplicate 
+# dups <- revtools::find_duplicates(data=df, match_variable = "project_name", to_lower = TRUE)
+# marine_energy_df <- revtools::extract_unique_references(df, dups)
+# 
+# # save
+# save(marine_energy_df, file = here::here("data/raw-data/external/PRIMRE-Tethys-combined.RData"))
+
+load(here::here("data/raw-data/external/PRIMRE-Tethys-combined.RData"))
+
+# Quick plot 
+marine_energy_df <- marine_energy_df %>%
+  mutate(year = as.numeric(ifelse(is.na(operational_start_year), project_start_year, operational_start_year)),
+         max_rated_power_capacity_MW = as.numeric(max_rated_power_capacity_MW)) %>%
+  filter(!is.na(year))
+marine_energy_df$year <- as.Date(paste0(marine_energy_df$year,"-01-01"))
+marine_energy_df <- marine_energy_df %>%
+  tidyr::replace_na(list(max_rated_power_capacity_MW = 0)) %>%  # Replace NA with zeros
+  group_by(project_life_cycle, year) %>%
+  arrange(project_life_cycle, year) %>%  # Arrange by year so adding works
+  group_by(project_life_cycle) %>%
+  mutate(cumMW = cumsum(max_rated_power_capacity_MW))
+
+summary(marine_energy_df)
+  
+
+ggplot(marine_energy_df, aes(year, cumMW, fill = project_life_cycle, col = project_life_cycle))+
+  geom_area(alpha = 0.5)+
+  scale_x_date()+
+  theme_bw()
+```
+
+
