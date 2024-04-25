@@ -1,6 +1,7 @@
 
 ## project specific files
 /data/raw-data/external/IEA-Energy-End-uses-and-Efficiency-Indicators-database-Highlights-November-2023.xlsx
+data/sqlite-databases/product1.sqlite
 
 # key information
 /keys/

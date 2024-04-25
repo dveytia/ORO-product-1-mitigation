@@ -16,6 +16,8 @@ library(ggplot2)
 
 # Marine energy
 
+## Deployment scale
+
 ```{r load from databases and deduplicate}
 # df1 <- readxl::read_excel(here::here("data/raw-data/external/PRIMRE-marine-energy-projects-database.xlsx"),sheet = "Projects")
 # df2 <- readxl::read_excel(here::here("data/raw-data/external/Tethys-pnnl-marine-energy-metadata.xlsx"),sheet = "Projects")
@@ -56,7 +58,7 @@ ggplot(marine_energy_df, aes(year, cumMW, fill = project_life_cycle, col = proje
 
 ```
 
-# IRENA renewable electricity statistics
+## IRENA renewable electricity statistics
 
 ```{r}
 df <- readxl::read_excel(here::here("data/raw-data/external/IRENA-electricity-statistics-by-country-year.xlsx"),
@@ -120,6 +122,38 @@ cdr_deployment %>%
   theme_bw()
 ```
 
+```{r Ocean Visions mCDR Field Trials}
+mCDR_field <- readxl::read_excel(here::here("data/raw-data/external/Ocean-visions-mCDR-field-trial-database.xlsx"),
+                                 sheet = "Data")
+mCDR_field_summary <- mCDR_field %>%
+  filter(!is.na(`Start of Pilot`)) %>%
+  group_by(`Start of Pilot`) %>%
+  summarise(
+    n_projects = n(),
+    planned_seq = sum(as.numeric(`Planned Sequestration (tons CO2)`), na.rm = T)
+  ) %>%
+  mutate(year = as.Date(as.numeric(`Start of Pilot`), origin = "1899-12-30")) %>%
+  arrange(year) %>%
+  mutate(cumulative_projects = cumsum(n_projects),
+         cumulative_seq = cumsum(planned_seq))
+  
+
+mCDR_field_summary <- reshape2::melt(mCDR_field_summary, measure.vars = c("cumulative_projects", "cumulative_seq"),
+                                     id.vars = "year")
+
+mCDR_field_summary$variable <- factor(mCDR_field_summary$variable,
+                                      levels = c("cumulative_projects", "cumulative_seq"),
+                                      labels = c("Projects (N)","Planned sequestration (tCO2)"))
+summary(mCDR_field_summary)
+
+ggplot(mCDR_field_summary, aes(year, value))+
+  facet_grid(variable ~., scales = "free_y", labeller = label_wrap_gen(width = 25))+
+  geom_line()+
+  labs(y = "Cumulative value", caption = "Source: Ocean Visions mCDR field trials database")+
+  scale_x_date(limits = c(as.Date("2018-01-01"), max(mCDR_field_summary$year)))+
+  theme_bw()
+```
+
 
 # Increasing efficiency
 
@@ -131,7 +165,52 @@ Fuel consumption rates were extracted from FEUD19 (litres per round weight tonne
 
 The combined rate of emissions was 3.3 kg CO2-eq GHG per litre of fuel combusted.
 
-## Transport
+
+```{r fuel use intentisty from greer et al 2019}
+
+# Emissions intensity
+dat <- metaDigitise::metaDigitise(dir=here::here("data/raw-data/external"), summary = FALSE)
+
+greer_industrial <- dat$scatterplot$`Greer-et-al-2019_emissions-intensity-figure.jpg`
+greer_industrial <- greer_industrial %>%
+  filter(1950 <= x & 0 <= y)
+
+save(greer_industrial, file= here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_industrial.RData"))
+
+
+# Fuel coefficient (engine efficiency)
+greer_FC <- readxl::read_excel(here::here("data/raw-data/external/Greer-et-al-2019_fuel-coefficient-table-5.xlsx"), sheet = "fuel_coefficient")
+greer_FC <- greer_FC %>%
+  mutate(variable = "Fuel coefficient") %>%
+  rename(y=fuel_coefficient)%>%
+  select(variable, year, y)
+  
+
+
+# Join dataframes
+fishing_efficiency_dat <- greer_industrial %>%
+  mutate(year = round(x)) %>%
+  mutate(variable = "Emissions intensity (tCO2/tcatch)") %>%
+  select(variable, year, y) 
+  
+fishing_efficiency_dat <- rbind(fishing_efficiency_dat,greer_FC)
+fishing_efficiency_dat$year <- as.Date(paste0(fishing_efficiency_dat$year,"-01-01"))
+
+
+ggplot(fishing_efficiency_dat, aes(year, y))+
+  geom_line()+
+  facet_grid(variable ~., scales = "free_y", labeller = label_wrap_gen())+
+  scale_x_date()+
+  labs(x="Year",y="Value",
+       caption = paste(strwrap("Source: Fig 3 and Table 5from Greer et al 2019, https://doi.org/10.1016/j.marpol.2018.12.001",width = 50), collapse = "\n"))+
+  theme_bw()
+
+
+```
+
+
+
+## Shipping
 
 ```{r load in iea total shipping emissions}
 shipping_emissions <- readxl::read_excel(here::here("data/raw-data/external/IEA-Energy-End-uses-and-Efficiency-Indicators-database-Highlights-November-2023.xlsx"), sheet = "Transport - Emissions")
@@ -175,12 +254,42 @@ ggplot(shipping_efficiency, aes(year, carbon_intensity_gCO2_per_tkm))+
 ```
 
 
+# Blue carbon
+
+## Duarte et al 2020 BC Restoration projects
+
+Source: Duarte, Carlos Manuel; Devassy, R P; Predragovic, M; Valuzzi, L; Parry, A; Hughes, Terry P (2020): Data set on restoration projects of coastal marine habitats reported worldwide [dataset]. PANGAEA, https://doi.org/10.1594/PANGAEA.912232. Accessed 24-04-2020
+
+```{r}
+bc_restoration <- readxl::read_excel(here::here("data/raw-data/external/Duarte2020RestorationDataSet-1.xlsx"),
+                                     sheet = "Data")
+
+bc_restoration %>%
+  group_by(Habitat, Year) %>%
+  summarise(n_projects = n()) %>%
+  ungroup() %>% 
+  tidyr::complete(Habitat, Year, fill = list(n_projects = 0)) %>%
+  arrange(Habitat, Year) %>%
+  group_by(Habitat) %>%
+  mutate(year = as.Date(paste0(Year, "-01-01")),
+         cumulative_projects = cumsum(n_projects)) %>%
+  filter(Habitat != "Coral Reefs") %>%
+  ggplot(aes(year, cumulative_projects, col = Habitat, fill = Habitat))+
+  geom_area(position = "stack", alpha = 0.5)+
+  labs(y = "Cumulative restoration projects (N)", x="Year",
+       caption = "Source: Duarte et al (2020), doi: https://doi.org/10.1594/PANGAEA.912232")+
+  scale_x_date()+
+  theme_bw()+
+  theme(legend.position = "bottom")
+
+```
 
 
 
 
 
-## Shipping
+
+
 
 
 

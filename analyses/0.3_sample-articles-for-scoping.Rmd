@@ -1,0 +1,106 @@
+---
+title: "0.3_sample-articles-for-scoping"
+author: "Devi Veytia"
+date: "2024-04-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set up -- run before anything else
+
+```{r set up libraries}
+## Load libraries
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(RSQLite)
+library(ggplot2)
+
+
+```
+
+```{r set the seed}
+addTaskCallback(function(...) {set.seed(123);TRUE})
+```
+
+
+# Sample the articles - for coding scoping 
+
+sampling approach for selecting articles:
+- sample evenly from three different mitigation ORO branches: MRE, increase efficiency, CDR
+- sample only predicted relevance > 0.8 because the purpose of this exercise is to practise the codebook, want to try to target articles most likely to be relevant.
+
+
+```{r sample articles for scoping coding}
+## Set up inputs to determine how many articles to sample
+setSize <- 200 # write the files in batches to not overwhelm sysrev
+nRecsTotal = 2000 # No of articles to sample in total
+
+
+
+## connect to database
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+
+# Collect table of unique references and categories (impact nature + different ORO types) to sample from
+relevantdedups <- tbl(p1_db, "uniquerefs") %>%
+  select(analysis_id, type, title, journal, year, volume, number, abstract,doi, # author, 
+         issn, keywords) %>%
+  collect()
+
+pred_OROmitigation <- tbl(p1_db, "pred_oro_any_mitigation") %>%  # mitigation ORO
+  # # Filter to relevance >=0.8
+  # filter(0.8 <= `oro_any.M_Renewables - mean_prediction`|
+  #        0.8 <= `oro_any.M_Increase_efficiency - mean_prediction`|
+  #        0.8 <= `oro_any.M_CO2_removal_or_storage - mean_prediction`) %>%
+  select(analysis_id, `oro_any.M_Renewables - mean_prediction`, `oro_any.M_Increase_efficiency - mean_prediction`,
+         `oro_any.M_CO2_removal_or_storage - mean_prediction`) %>%
+  collect()
+
+# For simplicity, remove articles where multiple OROs are predicted relevant
+pred_OROmitigation <- pred_OROmitigation %>%
+  mutate(n_OROs = rowSums(.[2:4] > 0.8)) %>%
+  filter(n_OROs == 1) %>%
+  select(-c(n_OROs))
+
+
+# sample data frame evenly for each ORO_type
+sampleDf <- reshape2::melt(pred_OROmitigation, id.vars = "analysis_id", variable.name = "ORO_type",
+                           value.name = "mean_prediction")
+sampleDf <- sampleDf %>%
+  filter(0.8 <= mean_prediction) %>%
+  group_by(ORO_type) %>%
+  slice_sample(n = round(nRecsTotal/3)) %>% 
+  ungroup() %>%
+  inner_join(relevantdedups, by="analysis_id") # Join with metadata
+
+# shuffle the row so they're in random order
+sampleDf <- sampleDf[sample(1:nrow(sampleDf), nrow(sampleDf), replace = FALSE),]
+sampleDf <- sampleDf[1:nRecsTotal,] # if there is an extra due to rounding remove
+
+# Write out a file that keeps a record of which articles were sampled to make a lookup table
+dbWriteTable(p1_db, "scopingCodingSample", sampleDf, overwrite = FALSE, append = FALSE)
+dbDisconnect(p1_db) # Disconnect the database
+
+
+
+## Write articles in batches to .ris files
+startInd <- seq(1, nrow(sampleDf), by = setSize) # the start id of the set
+endInd <- startInd+setSize-1
+endInd <- ifelse(endInd > nrow(sampleDf), nrow(sampleDf), endInd)
+
+for(i in 1:length(startInd)){
+  temp <- sampleDf[startInd[i]:endInd[i],]
+  temp <- as.data.frame(temp)
+  revtools::write_bibliography(temp, filename = here::here(
+        "data/derived-data/coding-scoping/",paste0("coding_scoping_set_",i,".ris")))
+}
+
+```
+
+
