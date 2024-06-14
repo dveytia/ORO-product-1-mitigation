@@ -1,0 +1,483 @@
+---
+title: "0.2_explore-external-data"
+author: "Devi Veytia"
+date: "2024-04-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load libraries}
+library(dplyr)
+library(ggplot2)
+library(sf)
+library(rnaturalearth)
+library(egg)
+countries <- map_data("world")
+
+```
+
+```{r method 1 to get robinson projection too much fuss}
+# Get a robinson projection as well
+# hack from: https://stackoverflow.com/questions/56146735/visual-bug-when-changing-robinson-projections-central-meridian-with-ggplot2/56155662#56155662
+world <- ne_countries(scale = "large", returnclass = "sf")
+polygon <- st_polygon(x = list(rbind(c(-0.0001, 90),
+                                     c(0, 90),
+                                     c(0, -90),
+                                     c(-0.0001, -90),
+                                     c(-0.0001, 90)))) %>%
+  st_sfc() %>%
+  st_set_crs(4326)
+# modify world dataset to remove overlapping portions with world's polygons
+sf_use_s2(FALSE)
+world2 <- world %>% st_difference(polygon)
+# perform transformation on modified version of world dataset
+world_robinson <- st_transform(world2, 
+                               crs = '+proj=robin +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs'
+                               )
+# dirty fix for error with geom_map
+obj_is_vector = function(x){TRUE} 
+
+
+
+```
+
+```{r}
+# Download countries polygons
+world_robinson <- ne_countries(type = "countries", 
+                   scale = "medium",
+                   returnclass = "sf") |>
+  # transform to desired projection
+  st_transform("ESRI:54030")
+# This is a dummy column used to fill in mean values
+world_robinson$value <- rnorm(242,0.5,0.1)
+
+# Make plot
+shp |>
+  ggplot(aes(fill = value, color = value)) +
+  geom_sf() +
+  coord_sf(expand = FALSE)
+
+```
+
+# Marine renewable energy
+
+
+## IRENA renewable electricity statistics
+
+This database presents statistics aggregated by country, technology, data type, grid connection, year. Data downloaded from: https://pxweb.irena.org/pxweb/en/IRENASTAT
+
+```{r plot deployment data from IRENA renewable energy statistics}
+df <- readxl::read_excel(here::here("data/raw-data/external/IRENA-electricity-statistics-by-country-year.xlsx"),
+                         sheet = "ELECSTAT-C", col_names = FALSE, skip = 2)
+colnames(df) <- c("country","technology","data_type","grid_connection","year","value")
+
+df <- df %>% 
+  tidyr::fill(country, technology, data_type, data_type, grid_connection, .direction = "down")
+
+# filter data to one variable, all grid connections
+df <- df %>%
+  filter(data_type == "Electricity Installed Capacity (MW)", grid_connection == "All", technology %in% c("Marine energy","Offshore wind energy")) 
+
+# Format columns
+df$year <- as.Date(paste0(df$year,"-01-01"))
+
+# plot of time series
+mre_installedCapacityTimeseries_ggp <- df %>%
+  group_by(year) %>%
+  summarise(installed_capacity = sum(value, na.rm=T)) %>%
+  ggplot(aes(year, installed_capacity))+
+  geom_area(alpha=0.5)+
+  labs(y = "Electricity Installed Capacity (MW)", x= "Year",
+       caption = "annual value comprises marine energy and offshore wind, for all countries\n Data source: IRENA renewable electricity statistics (https://pxweb.irena.org/pxweb/en/IRENASTAT)")+
+  scale_x_date()+
+  theme_bw()+
+  theme(legend.position = 'none')
+mre_installedCapacityTimeseries_ggp
+
+# Map by country
+df2 <- df %>%
+  group_by(country) %>%
+  summarise(installed_capacity = sum(value, na.rm=T)) %>%
+  mutate(iso_n3 = as.character(countrycode(country, origin = "country.name", destination = "iso3n")))
+df2 <- merge(world_robinson, df2, by = "iso_n3", all.x = TRUE)
+
+# exponential colour scale
+brks = seq(min(df2$installed_capacity), max(df2$installed_capacity), length.out = 15)
+a=1
+b= 1.5
+vals = scales::rescale(a*(b^(1:length(brks))), to = c(0,1))
+#plot(vals)
+
+# plot
+mre_installedCapacityCountryCumulative_ggp <- df2 |>
+  ggplot(aes(fill = installed_capacity, color = installed_capacity)) +
+  geom_sf() +
+  coord_sf(expand = FALSE)+
+  scale_fill_viridis_c(values = vals)+
+  scale_color_viridis_c(values = vals)+
+  labs(fill = "",color = "")+
+  # scale_fill_stepsn(breaks = brks, colors = viridis::viridis(length(brks)),
+  #                   values = vals)+
+  # scale_color_stepsn(breaks = brks, colors = viridis::viridis(length(brks)),
+  #                    values = vals)+
+  theme(legend.position = "bottom")
+
+mre_installedCapacityCountryCumulative_ggp
+
+
+# Plot together
+
+mre_plots <- ggarrange(
+  plots = list(
+    mre_installedCapacityCountryCumulative_ggp + 
+      theme(plot.margin=unit(c(1,0.5,0.5,0.1), 'cm')), 
+    mre_installedCapacityTimeseries_ggp), nrow=1, widths = c(3.5,3), 
+          labels = c("a. MRE installed capacity (2000 - 2023)", "b. Global annual MRE installed capacity"),
+          label.args = list(gp = grid::gpar(font = 4, cex = 1.2)),
+          newpage = FALSE, draw=FALSE)
+
+
+
+ggsave(here::here("figures/2024-07-01_expert-panel-meeting/MRE_deployment_figures.pdf"),
+       mre_plots, height = 5, width = 12, units = 'in')
+
+
+
+
+## which country is responsible for jump in 2010?
+# subset to just the highest countries
+top_countries <- df %>%
+  group_by(country) %>%
+  summarise(installed_capacity = sum(value, na.rm=T)) %>%
+  arrange(desc(installed_capacity)) %>%
+  head(5) 
+
+df3 <- df[which(df$country %in% top_countries$country),]
+df3$country <- countrycode(df3$country, origin = "country.name", destination = "country.name")
+
+mre_installedCapacityTimeseriesTopCountries_ggp <-  df3 %>%
+  group_by(year, country) %>%
+  summarise(installed_capacity = sum(value, na.rm=T)) %>%
+  ggplot(aes(year, installed_capacity, fill = country, colour = country))+
+  geom_area(alpha=0.5)+
+  labs(y = "Electricity Installed Capacity (MW)", 
+       x= "Year")+
+  scale_x_date()+
+  theme_bw()+
+  theme(legend.position = "bottom")+guides(fill=guide_legend(nrow=2,byrow=TRUE))
+
+mre_installedCapacityTimeseriesTopCountries_ggp
+
+
+
+
+## which technology is responsible for jump in 2010?
+# subset to just the highest countries
+mre_installedCapacityTimeseriesTechnology_ggp <- df %>%
+  group_by(year, technology) %>%
+  summarise(installed_capacity = sum(value, na.rm=T)) %>%
+  ggplot(aes(year, installed_capacity, fill = technology, colour = technology))+
+  geom_area(alpha=0.5)+
+  labs(y = "Electricity Installed Capacity (MW)", 
+       x= "Year")+
+  scale_x_date()+
+  theme_bw()+
+  theme(legend.position = "bottom",
+        plot.margin=unit(c(1,0,0,0), 'cm'))
+
+
+
+## Just do an inset of Marine energy by country
+top_countries_me <- df %>%
+  filter(technology == "Marine energy") %>%
+  group_by(country) %>%
+  summarise(installed_capacity = sum(value, na.rm=T)) %>%
+  arrange(desc(installed_capacity)) %>%
+  head(5) 
+
+df4 <- df[which(df$country %in% top_countries_me$country),]
+df4$country <- countrycode(df4$country, origin = "country.name", destination = "country.name")
+
+mre_installedCapacityTimeseriesTopCountriesMarineEnergy_ggp <-  df4 %>%
+  group_by(year, country) %>%
+  summarise(installed_capacity = sum(value, na.rm=T)) %>%
+  ggplot(aes(year, installed_capacity, fill = country))+
+  geom_area(alpha=0.5)+
+  labs(y = "", 
+       x= "")+
+  scale_x_date()+
+  theme_bw()+
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size=7),
+    legend.text = element_text(size=7),
+    legend.key.size = unit(0.5, units="cm"),
+    axis.title = element_text(size=5),
+    axis.text = element_text(size=4)
+    )+
+  guides(fill=guide_legend(nrow=2,byrow=TRUE))
+
+
+
+# library(cowplot)
+# 
+# plotwithinset <- ggdraw()+
+#   draw_plot(mre_installedCapacityTimeseriesTechnology_ggp+
+#               theme(plot.margin=unit(c(0,0,0,0), 'cm')))+
+#   draw_plot(mre_installedCapacityTimeseriesTopCountriesMarineEnergy_ggp+
+#               theme(plot.margin=unit(c(0,0,0,0), 'cm')),
+#             x=0.15,y=0.45,width = 0.4, height = 0.5)
+# plotwithinset
+
+
+plotwithinset2 <- mre_installedCapacityTimeseriesTechnology_ggp+
+  annotation_custom(
+    ggplotGrob(mre_installedCapacityTimeseriesTopCountriesMarineEnergy_ggp), 
+    xmin = -Inf, xmax = as.Date("2015-01-01"), ymin = 15000, ymax = Inf
+  )
+
+
+## ARRANGE TOGETHER
+mre_plots <- ggarrange(
+  plots = list(
+    mre_installedCapacityTimeseries_ggp+ 
+      theme(plot.margin=unit(c(1,0.5,0.5,0.1), 'cm')),
+    mre_installedCapacityTimeseriesTopCountries_ggp+ 
+      theme(plot.margin=unit(c(1,0.5,0.5,0.1), 'cm')),
+    plotwithinset2+
+      theme(plot.margin=unit(c(1,0.5,0.5,0.1), 'cm')),
+    mre_installedCapacityCountryCumulative_ggp + 
+      theme(plot.margin=unit(c(1,0.5,0.5,0.1), 'cm'))
+    ),
+  nrow=2, 
+  labels = c("a. Global annual MRE installed capacity", 
+             "b. Top 5 countries",
+             "c. By technology",
+             "d. MRE installed capacity (2000 - 2023)"
+             ),
+          label.args = list(gp = grid::gpar(font = 4, cex = 1.2)),
+          newpage = FALSE, draw=FALSE)
+
+
+
+ggsave(here::here("figures/2024-07-01_expert-panel-meeting/MRE_deployment_figures.pdf"),
+       mre_plots, height = 10, width = 12, units = 'in')
+
+```
+
+## 4 C Offshore?
+
+
+
+
+# Novel CDR deployments - State of CDR Report 2022
+
+```{r load in novel CDR deployment data}
+cdr_deployment <- readxl::read_excel(here::here("data/raw-data/external/State-of-Carbon-Report-2022-Novel-CDR-Deployment-Data.xlsx"), skip = 1)
+
+carbon_sinks <- unique(do.call(c, unique(as.vector(cdr_deployment[,3:6]))))
+carbon_sinks
+
+cdr_deployment$carbon_sink <- apply(cdr_deployment[,3:6], 1, paste, collapse=", ")
+cdr_deployment <- cdr_deployment %>%
+  mutate(ocean = ifelse(
+    grepl("Aquatic", carbon_sink) | grepl("Deep Ocean", carbon_sink)| 
+      grepl("Dissolved CO2", carbon_sink) | grepl("Bicarbonate", carbon_sink), TRUE,FALSE
+  ))
+cdr_deployment$year = as.Date(paste0(cdr_deployment$`Year active`,"-01-01")) 
+
+summary(cdr_deployment)
+
+cdr_deployment %>%
+  filter(ocean) %>%
+  group_by(year) %>%
+  summarise(`Gross Removals\n(tCO2/year)` = sum(`Gross Removals\n(tCO2/year)`, na.rm=T)) %>%
+  mutate(`Gross Removals\n(tCO2/year)` = cumsum(`Gross Removals\n(tCO2/year)`)) %>%
+  ggplot(aes(year, `Gross Removals\n(tCO2/year)`))+
+  geom_line()+
+  geom_point()+
+  scale_x_date()+
+  labs(y = "Cumulative Gross Removals\n(tCO2/year)",
+       caption = "Source: State of CDR Report 2022 - Novel CDR Deployment Data\nfiltered for where carbon is stored in ocean sinks")+
+  theme_bw()
+```
+
+```{r Ocean Visions mCDR Field Trials}
+mCDR_field <- readxl::read_excel(here::here("data/raw-data/external/Ocean-visions-mCDR-field-trial-database.xlsx"),
+                                 sheet = "Data")
+mCDR_field_summary <- mCDR_field %>%
+  filter(!is.na(`Start of Pilot`)) %>%
+  group_by(`Start of Pilot`) %>%
+  summarise(
+    n_projects = n(),
+    planned_seq = sum(as.numeric(`Planned Sequestration (tons CO2)`), na.rm = T)
+  ) %>%
+  mutate(year = as.Date(as.numeric(`Start of Pilot`), origin = "1899-12-30")) %>%
+  arrange(year) %>%
+  mutate(cumulative_projects = cumsum(n_projects),
+         cumulative_seq = cumsum(planned_seq))
+  
+
+mCDR_field_summary <- reshape2::melt(mCDR_field_summary, measure.vars = c("cumulative_projects", "cumulative_seq"),
+                                     id.vars = "year")
+
+mCDR_field_summary$variable <- factor(mCDR_field_summary$variable,
+                                      levels = c("cumulative_projects", "cumulative_seq"),
+                                      labels = c("Projects (N)","Planned sequestration (tCO2)"))
+summary(mCDR_field_summary)
+
+ggplot(mCDR_field_summary, aes(year, value))+
+  facet_grid(variable ~., scales = "free_y", labeller = label_wrap_gen(width = 25))+
+  geom_line()+
+  labs(y = "Cumulative value", caption = "Source: Ocean Visions mCDR field trials database")+
+  scale_x_date(limits = c(as.Date("2018-01-01"), max(mCDR_field_summary$year)))+
+  theme_bw()
+```
+
+
+# Increasing efficiency
+
+## Fishing
+
+Estimates of fishing effort were sourced from a global database based on estimates of total vessel engine size and number of fishing days in a year, assembled from FAO, the European Union, regional tuna-management bodies and other sources50,51
+
+Fuel consumption rates were extracted from FEUD19 (litres per round weight tonne). Records of fisheries operating before 1985 were excluded from analysis, as were any records for which target species group or gear type could not be determined
+
+The combined rate of emissions was 3.3 kg CO2-eq GHG per litre of fuel combusted.
+
+
+```{r fuel use intentisty from greer et al 2019}
+
+# Emissions intensity
+dat <- metaDigitise::metaDigitise(dir=here::here("data/raw-data/external"), summary = FALSE)
+
+greer_industrial <- dat$scatterplot$`Greer-et-al-2019_emissions-intensity-figure.jpg`
+greer_industrial <- greer_industrial %>%
+  filter(1950 <= x & 0 <= y)
+
+save(greer_industrial, file= here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_industrial.RData"))
+
+
+# Fuel coefficient (engine efficiency)
+greer_FC <- readxl::read_excel(here::here("data/raw-data/external/Greer-et-al-2019_fuel-coefficient-table-5.xlsx"), sheet = "fuel_coefficient")
+greer_FC <- greer_FC %>%
+  mutate(variable = "Fuel coefficient") %>%
+  rename(y=fuel_coefficient)%>%
+  select(variable, year, y)
+  
+
+
+# Join dataframes
+fishing_efficiency_dat <- greer_industrial %>%
+  mutate(year = round(x)) %>%
+  mutate(variable = "Emissions intensity (tCO2/tcatch)") %>%
+  select(variable, year, y) 
+  
+fishing_efficiency_dat <- rbind(fishing_efficiency_dat,greer_FC)
+fishing_efficiency_dat$year <- as.Date(paste0(fishing_efficiency_dat$year,"-01-01"))
+
+
+ggplot(fishing_efficiency_dat, aes(year, y))+
+  geom_line()+
+  facet_grid(variable ~., scales = "free_y", labeller = label_wrap_gen())+
+  scale_x_date()+
+  labs(x="Year",y="Value",
+       caption = paste(strwrap("Source: Fig 3 and Table 5from Greer et al 2019, https://doi.org/10.1016/j.marpol.2018.12.001",width = 50), collapse = "\n"))+
+  theme_bw()
+
+
+```
+
+
+
+## Shipping
+
+```{r load in iea total shipping emissions}
+shipping_emissions <- readxl::read_excel(here::here("data/raw-data/external/IEA-Energy-End-uses-and-Efficiency-Indicators-database-Highlights-November-2023.xlsx"), sheet = "Transport - Emissions")
+
+colnames(shipping_emissions) <- c("country","vehicle_type","product","2000","2005","2010","2015","2016","2017","2018","2019","2020","2021")
+
+shipping_emissions <- shipping_emissions %>%
+  filter(vehicle_type == "Total ships")
+
+shipping_emissions <- reshape2::melt(shipping_emissions, 
+                                     measure.vars = c("2000","2005","2010","2015","2016","2017","2018","2019","2020","2021"),
+                                     variable.name = "year",
+                                     value.name = "value")
+
+shipping_emissions$year <- as.Date(paste0(shipping_emissions$year,"-01-01"))
+shipping_emissions$value <- as.numeric(shipping_emissions$value)
+
+shipping_emissions %>%
+ filter(country == "IEA Total") %>%
+  ggplot(aes(year, value))+
+  geom_line()+
+  geom_point()+
+  scale_x_date()+
+  labs(y = "IEA total shipping emissions (Mt CO2)")+
+  theme_bw()+
+  theme(legend.position = 'none')
+
+```
+
+```{r load in IEA shipping energy efficiency}
+
+shipping_efficiency <- readxl::read_excel(here::here("data/raw-data/external/IEA-shipping-energy-efficiency.xlsx"), sheet = "Data")
+shipping_efficiency$year <- as.Date(paste0(shipping_efficiency$year,"-01-01"))
+
+ggplot(shipping_efficiency, aes(year, carbon_intensity_gCO2_per_tkm))+
+  geom_line()+
+  geom_point()+
+  scale_x_date()+
+  labs(y="Shipping energy efficiency (gCO2/tkm)", caption = "source: IEA energy end uses and efficiency indicators database")+
+  theme_bw()
+```
+
+
+# Blue carbon
+
+## Duarte et al 2020 BC Restoration projects
+
+Source: Duarte, Carlos Manuel; Devassy, R P; Predragovic, M; Valuzzi, L; Parry, A; Hughes, Terry P (2020): Data set on restoration projects of coastal marine habitats reported worldwide [dataset]. PANGAEA, https://doi.org/10.1594/PANGAEA.912232. Accessed 24-04-2020
+
+```{r}
+bc_restoration <- readxl::read_excel(here::here("data/raw-data/external/Duarte2020RestorationDataSet-1.xlsx"),
+                                     sheet = "Data")
+
+bc_restoration %>%
+  group_by(Habitat, Year) %>%
+  summarise(n_projects = n()) %>%
+  ungroup() %>% 
+  tidyr::complete(Habitat, Year, fill = list(n_projects = 0)) %>%
+  arrange(Habitat, Year) %>%
+  group_by(Habitat) %>%
+  mutate(year = as.Date(paste0(Year, "-01-01")),
+         cumulative_projects = cumsum(n_projects)) %>%
+  filter(Habitat != "Coral Reefs") %>%
+  ggplot(aes(year, cumulative_projects, col = Habitat, fill = Habitat))+
+  geom_area(position = "stack", alpha = 0.5)+
+  labs(y = "Cumulative restoration projects (N)", x="Year",
+       caption = "Source: Duarte et al (2020), doi: https://doi.org/10.1594/PANGAEA.912232")+
+  scale_x_date()+
+  theme_bw()+
+  theme(legend.position = "bottom")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
