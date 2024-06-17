@@ -19,7 +19,7 @@ countries <- map_data("world")
 
 ```
 
-```{r method 1 to get robinson projection too much fuss}
+```{r method 1 to get robinson projection too much fuss, eval = FALSE}
 # Get a robinson projection as well
 # hack from: https://stackoverflow.com/questions/56146735/visual-bug-when-changing-robinson-projections-central-meridian-with-ggplot2/56155662#56155662
 world <- ne_countries(scale = "large", returnclass = "sf")
@@ -44,7 +44,7 @@ obj_is_vector = function(x){TRUE}
 
 ```
 
-```{r}
+```{r method 2 to get robinson projection}
 # Download countries polygons
 world_robinson <- ne_countries(type = "countries", 
                    scale = "medium",
@@ -55,7 +55,7 @@ world_robinson <- ne_countries(type = "countries",
 world_robinson$value <- rnorm(242,0.5,0.1)
 
 # Make plot
-shp |>
+world_robinson |>
   ggplot(aes(fill = value, color = value)) +
   geom_sf() +
   coord_sf(expand = FALSE)
@@ -271,6 +271,112 @@ ggsave(here::here("figures/2024-07-01_expert-panel-meeting/MRE_deployment_figure
 ## 4 C Offshore?
 
 
+# Increasing efficiency
+
+
+```{r load in total emissions datasets}
+
+# IEA domestic transport total emissions
+domestic_shipping_emissions <- readxl::read_excel(here::here("data/raw-data/external/IEA-Energy-End-uses-and-Efficiency-Indicators-database-Highlights-November-2023.xlsx"), sheet = "Transport - Emissions")
+
+colnames(domestic_shipping_emissions) <- c("country","vehicle_type","product","2000","2005","2010","2015","2016","2017","2018","2019","2020","2021")
+
+domestic_shipping_emissions <- domestic_shipping_emissions %>%
+  filter(vehicle_type == "Total ships")
+
+domestic_shipping_emissions <- reshape2::melt(domestic_shipping_emissions, 
+                                     measure.vars = c("2000","2005","2010","2015","2016","2017","2018","2019","2020","2021"),
+                                     variable.name = "year",
+                                     value.name = "value")
+
+domestic_shipping_emissions$year <- as.Date(paste0(domestic_shipping_emissions$year,"-01-01"))
+domestic_shipping_emissions$value <- as.numeric(domestic_shipping_emissions$value)
+
+
+# OECD Maritime transport CO2 emissions
+# https://data-explorer.oecd.org/vis?tm=ship&pg=0&snb=24&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_MARITIME_TRANSPORT%40DF_MARITIME_TRANSPORT&df[ag]=OECD.SDD.NAD.SEEA&df[vs]=1.0&pd=2022-01%2C&dq=.M......ALL_VESSELS&ly[rw]=REF_AREA&ly[cl]=TIME_PERIOD&to[TIME_PERIOD]=false
+
+```
+
+``````{r load in total volume datasets i.e. tonnes}
+
+# OECD Annual container transport (tonnes) 
+# https://data-explorer.oecd.org/vis?df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_TRENDS%40DF_TRENDSCONT&df[ag]=OECD.ITF&df[vs]=1.0&lo=5&lom=LASTNPERIODS&dq=.A.....&to[TIME_PERIOD]=false
+
+
+# OECD Annual transport trends (tonnes)
+# https://data-explorer.oecd.org/vis?tm=ship&pg=0&snb=24&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_TRENDS%40DF_TRENDS&df[ag]=OECD.ITF&df[vs]=1.0&pd=1970%2C2022&dq=.A.CONTAINER%2BFREIGHT.TKM%2BT.COASTAL%2BMAR..&ly[rw]=REF_AREA&ly[cl]=TIME_PERIOD&ly[rs]=MEASURE%2CUNIT_MEASURE&to[TIME_PERIOD]=false
+
+
+# World bank capture fisheries production (tonnes)
+# https://data.worldbank.org/indicator/ER.FSH.CAPT.MT
+
+```
+
+
+
+```{r load in efficiency datasets}
+
+# Fuel coefficient (engine efficiency) - Greer et al 2019
+greer_FC <- readxl::read_excel(here::here("data/raw-data/external/Greer-et-al-2019_fuel-coefficient-table-5.xlsx"), sheet = "fuel_coefficient")
+greer_FC <- greer_FC %>%
+  mutate(variable = "Fuel coefficient") %>%
+  rename(y=fuel_coefficient)%>%
+  select(variable, year, y)
+
+
+# IEA domestic transport shipping energy efficiency 
+# https://www.iea.org/data-and-statistics/data-product/energy-efficiency-indicators
+domestic_shipping_efficiency <- readxl::read_excel(here::here("data/raw-data/external/IEA-shipping-energy-efficiency.xlsx"), sheet = "Data")
+domestic_shipping_efficiency$year <- as.Date(paste0(domestic_shipping_efficiency$year,"-01-01"))
+
+ggplot(domestic_shipping_efficiency, aes(year, carbon_intensity_gCO2_per_tkm))+
+  geom_line()+
+  geom_point()+
+  scale_x_date()+
+  labs(y="Shipping energy efficiency (gCO2/tkm)", caption = "source: IEA energy end uses and efficiency indicators database")+
+  theme_bw()
+
+
+# Fishing Emissions intensity - Greer et al 2019
+dat <- metaDigitise::metaDigitise(dir=here::here("data/raw-data/external"), summary = FALSE)
+
+greer_industrial <- dat$scatterplot$`Greer-et-al-2019_emissions-intensity-figure.jpg`
+greer_industrial <- greer_industrial %>%
+  filter(1950 <= x & 0 <= y)
+
+save(greer_industrial, file= here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_industrial.RData"))
+
+
+
+  
+
+
+# Join dataframes
+fishing_efficiency_dat <- greer_industrial %>%
+  mutate(year = round(x)) %>%
+  mutate(variable = "Emissions intensity (tCO2/tcatch)") %>%
+  select(variable, year, y) 
+  
+fishing_efficiency_dat <- rbind(fishing_efficiency_dat,greer_FC)
+fishing_efficiency_dat$year <- as.Date(paste0(fishing_efficiency_dat$year,"-01-01"))
+
+
+ggplot(fishing_efficiency_dat, aes(year, y))+
+  geom_line()+
+  facet_grid(variable ~., scales = "free_y", labeller = label_wrap_gen())+
+  scale_x_date()+
+  labs(x="Year",y="Value",
+       caption = paste(strwrap("Source: Fig 3 and Table 5from Greer et al 2019, https://doi.org/10.1016/j.marpol.2018.12.001",width = 50), collapse = "\n"))+
+  theme_bw()
+
+
+
+
+```
+
+How to compare trends between total volume and efficiency?
+
 
 
 # Novel CDR deployments - State of CDR Report 2022
@@ -337,104 +443,6 @@ ggplot(mCDR_field_summary, aes(year, value))+
   theme_bw()
 ```
 
-
-# Increasing efficiency
-
-## Fishing
-
-Estimates of fishing effort were sourced from a global database based on estimates of total vessel engine size and number of fishing days in a year, assembled from FAO, the European Union, regional tuna-management bodies and other sources50,51
-
-Fuel consumption rates were extracted from FEUD19 (litres per round weight tonne). Records of fisheries operating before 1985 were excluded from analysis, as were any records for which target species group or gear type could not be determined
-
-The combined rate of emissions was 3.3 kg CO2-eq GHG per litre of fuel combusted.
-
-
-```{r fuel use intentisty from greer et al 2019}
-
-# Emissions intensity
-dat <- metaDigitise::metaDigitise(dir=here::here("data/raw-data/external"), summary = FALSE)
-
-greer_industrial <- dat$scatterplot$`Greer-et-al-2019_emissions-intensity-figure.jpg`
-greer_industrial <- greer_industrial %>%
-  filter(1950 <= x & 0 <= y)
-
-save(greer_industrial, file= here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_industrial.RData"))
-
-
-# Fuel coefficient (engine efficiency)
-greer_FC <- readxl::read_excel(here::here("data/raw-data/external/Greer-et-al-2019_fuel-coefficient-table-5.xlsx"), sheet = "fuel_coefficient")
-greer_FC <- greer_FC %>%
-  mutate(variable = "Fuel coefficient") %>%
-  rename(y=fuel_coefficient)%>%
-  select(variable, year, y)
-  
-
-
-# Join dataframes
-fishing_efficiency_dat <- greer_industrial %>%
-  mutate(year = round(x)) %>%
-  mutate(variable = "Emissions intensity (tCO2/tcatch)") %>%
-  select(variable, year, y) 
-  
-fishing_efficiency_dat <- rbind(fishing_efficiency_dat,greer_FC)
-fishing_efficiency_dat$year <- as.Date(paste0(fishing_efficiency_dat$year,"-01-01"))
-
-
-ggplot(fishing_efficiency_dat, aes(year, y))+
-  geom_line()+
-  facet_grid(variable ~., scales = "free_y", labeller = label_wrap_gen())+
-  scale_x_date()+
-  labs(x="Year",y="Value",
-       caption = paste(strwrap("Source: Fig 3 and Table 5from Greer et al 2019, https://doi.org/10.1016/j.marpol.2018.12.001",width = 50), collapse = "\n"))+
-  theme_bw()
-
-
-```
-
-
-
-## Shipping
-
-```{r load in iea total shipping emissions}
-shipping_emissions <- readxl::read_excel(here::here("data/raw-data/external/IEA-Energy-End-uses-and-Efficiency-Indicators-database-Highlights-November-2023.xlsx"), sheet = "Transport - Emissions")
-
-colnames(shipping_emissions) <- c("country","vehicle_type","product","2000","2005","2010","2015","2016","2017","2018","2019","2020","2021")
-
-shipping_emissions <- shipping_emissions %>%
-  filter(vehicle_type == "Total ships")
-
-shipping_emissions <- reshape2::melt(shipping_emissions, 
-                                     measure.vars = c("2000","2005","2010","2015","2016","2017","2018","2019","2020","2021"),
-                                     variable.name = "year",
-                                     value.name = "value")
-
-shipping_emissions$year <- as.Date(paste0(shipping_emissions$year,"-01-01"))
-shipping_emissions$value <- as.numeric(shipping_emissions$value)
-
-shipping_emissions %>%
- filter(country == "IEA Total") %>%
-  ggplot(aes(year, value))+
-  geom_line()+
-  geom_point()+
-  scale_x_date()+
-  labs(y = "IEA total shipping emissions (Mt CO2)")+
-  theme_bw()+
-  theme(legend.position = 'none')
-
-```
-
-```{r load in IEA shipping energy efficiency}
-
-shipping_efficiency <- readxl::read_excel(here::here("data/raw-data/external/IEA-shipping-energy-efficiency.xlsx"), sheet = "Data")
-shipping_efficiency$year <- as.Date(paste0(shipping_efficiency$year,"-01-01"))
-
-ggplot(shipping_efficiency, aes(year, carbon_intensity_gCO2_per_tkm))+
-  geom_line()+
-  geom_point()+
-  scale_x_date()+
-  labs(y="Shipping energy efficiency (gCO2/tkm)", caption = "source: IEA energy end uses and efficiency indicators database")+
-  theme_bw()
-```
 
 
 # Blue carbon
