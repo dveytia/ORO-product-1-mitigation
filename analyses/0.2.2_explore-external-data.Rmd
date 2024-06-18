@@ -378,8 +378,7 @@ all_volume_global_ggp <- ggplot(all_volume_df, aes(x=year, y = value))+
 
 all_volume_global_ggp
 
-
-
+# Plot and scale on second axis
 ylim.prim <- range(oecd_transport_trends_global$value, na.rm = T)   
 ylim.sec <- range(wb_capture_fisheries_global$value, na.rm = T)
 b <- diff(ylim.prim)/diff(ylim.sec)
@@ -477,7 +476,7 @@ all_emissions_global_ggp <- ggplot(all_emissions_global_df, aes(x=year, y = valu
     x = "Year",
     y = "Mt CO2",
     color = "Dataset",
-    caption = "breakdown by vessel type available for OECD dataset"
+    caption = "Breakdown by vessel type available for OECD dataset,\ntransformed Tonnes to Mt by dividing by 1,000,000\nIEA data is the free highlights version (every 5 years)\nMissing Fisheries emissions from Greer et al 2019"
   )+
   theme_bw()+
   theme(
@@ -509,13 +508,13 @@ ggplot(domestic_shipping_efficiency, aes(year, carbon_intensity_gCO2_per_tkm))+
   geom_line()+
   geom_point()+
   scale_x_date()+
-  labs(y="Shipping energy efficiency (gCO2/tkm)", caption = "source: IEA energy end uses and efficiency indicators database")+
+  labs(y="Shipping energy efficiency (gCO2/tkm)", caption = "source: IEA energy end uses and efficiency indicators database (domestic shipping)")+
   theme_bw()
 
 
 # Fishing Emissions intensity - Greer et al 2019
 # For extraction code using metadigitize see version of file 0.2.1
-greer_industrial <- load(here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_industrial.RData"))
+load(here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_industrial.RData"))
 
 
 
