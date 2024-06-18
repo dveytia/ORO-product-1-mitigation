@@ -15,7 +15,7 @@ library(ggplot2)
 library(sf)
 library(rnaturalearth)
 library(egg)
-countries <- map_data("world")
+#countries <- map_data("world")
 
 ```
 
@@ -273,45 +273,220 @@ ggsave(here::here("figures/2024-07-01_expert-panel-meeting/MRE_deployment_figure
 
 # Increasing efficiency
 
+``````{r load in total volume datasets i.e. tonnes}
+
+# OECD Annual container transport (tonnes) 
+# https://data-explorer.oecd.org/vis?df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_TRENDS%40DF_TRENDSCONT&df[ag]=OECD.ITF&df[vs]=1.0&lo=5&lom=LASTNPERIODS&dq=.A.....&to[TIME_PERIOD]=false
+oecd_container_transport <- read.csv(
+  here::here("data/raw-data/external/OECD_annual_container_transport.csv")
+)
+oecd_container_transport <- oecd_container_transport %>%
+  filter(Transport.mode == "Maritime") %>%
+  mutate(
+    country = Reference.area,
+    country_code = countrycode::countrycode(Reference.area, origin = "country.name",
+                          destination = "country.name"),
+    vehicle_type = "All ships",
+    product = "Container transport (Tonnes)",
+    year = as.Date(paste0(TIME_PERIOD,"-01-01")),
+    value = OBS_VALUE #*0.907185 # Convert Tonnes to Mt?
+    ) %>%
+  filter(!is.na(year)) %>% # NA values are yearly totals
+  select(country,country_code, vehicle_type, product, year, value)
+oecd_container_transport$dataset <- paste("OECD container transport")
+
+
+# OECD Annual transport trends (tonnes)
+# https://data-explorer.oecd.org/vis?tm=ship&pg=0&snb=24&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_TRENDS%40DF_TRENDS&df[ag]=OECD.ITF&df[vs]=1.0&pd=1970%2C2022&dq=.A.CONTAINER%2BFREIGHT.TKM%2BT.COASTAL%2BMAR..&ly[rw]=REF_AREA&ly[cl]=TIME_PERIOD&ly[rs]=MEASURE%2CUNIT_MEASURE&to[TIME_PERIOD]=false
+oecd_transport_trends <- read.csv(
+  here::here("data/raw-data/external/OECD_annual_transport_trends.csv")
+)
+oecd_transport_trends <- oecd_transport_trends %>%
+  mutate(
+    country = Reference.area,
+    country_code = countrycode::countrycode(Reference.area, origin = "country.name",
+                          destination = "country.name"),
+    vehicle_type = gsub(" transport","",Measure),
+    product = "Transport (Tonnes)",
+    year = as.Date(paste0(TIME_PERIOD,"-01-01")),
+    value = OBS_VALUE 
+    ) %>%
+  filter(!is.na(year)) %>% # NA values are yearly totals
+  select(country,country_code, vehicle_type, product, year, value)
+oecd_transport_trends$dataset <- paste("OECD transport trends")
+# get world total
+oecd_transport_trends_global <- oecd_transport_trends %>%
+  group_by(vehicle_type, product, year) %>%
+  summarise(value = sum(value)) %>%
+  mutate(country = "World")
+
+
+# World bank capture fisheries production (tonnes)
+# https://data.worldbank.org/indicator/ER.FSH.CAPT.MT
+wb_capture_fisheries <- readxl::read_excel(
+  here::here("data/raw-data/external/The-World-Bank_Data_Extract_From_World_Development_Indicators.xlsx"), sheet = "Data"
+)
+wb_capture_fisheries <- wb_capture_fisheries %>%
+  filter(`Series Name` == "Capture fisheries production (metric tons)") %>%
+  mutate(country = `Country Name`,
+         country_code = countrycode::countrycode(`Country Name`, 
+                                                 origin = "country.name",
+                          destination = "country.name"),
+         vehicle_type = "Capture fisheries",
+         product = "Fisheries production (metric tons)") 
+# Format column names into Year and melt into long form
+colnames(wb_capture_fisheries)[5:68] <- as.integer(
+  substr(
+    colnames(wb_capture_fisheries)[5:68], 
+    1, 4))
+wb_capture_fisheries <- reshape2::melt(
+  wb_capture_fisheries,
+  id.vars = c("Series Name", "Series Code","Country Name",
+              "Country Code","country","country_code","vehicle_type","product"),
+  variable.name = "year"
+)
+wb_capture_fisheries <- wb_capture_fisheries %>%
+  select(country,country_code, vehicle_type, product, year, value)
+wb_capture_fisheries$year <- as.Date(paste0(wb_capture_fisheries$year,"-01-01"))
+wb_capture_fisheries$value <- as.numeric(wb_capture_fisheries$value)
+# Subset to just global sums
+wb_capture_fisheries_global <- wb_capture_fisheries %>%
+  filter(country == "World")
+
+
+
+
+## Combine Volume datasets
+all_volume_df <- rbind(
+  oecd_transport_trends_global %>%
+    select(vehicle_type, product, year, value),
+  wb_capture_fisheries_global %>%
+    select(vehicle_type, product, year, value)
+)
+# Plot
+all_volume_global_ggp <- ggplot(all_volume_df, aes(x=year, y = value))+
+  geom_line(aes(color = vehicle_type)) +
+  labs(
+    x = "Year",
+    y = "Tonnes",
+    color = "Dataset"
+  )+
+  theme_bw()+
+  theme(
+    legend.position = "bottom"
+  )
+
+all_volume_global_ggp
+
+
+
+ylim.prim <- range(oecd_transport_trends_global$value, na.rm = T)   
+ylim.sec <- range(wb_capture_fisheries_global$value, na.rm = T)
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1]
+
+all_volume_global_ggp <- ggplot(oecd_transport_trends_global, 
+                                aes(year, value, color = vehicle_type)) +
+  geom_line() +
+  geom_line(data = wb_capture_fisheries_global,
+            aes(x=year, y = a + value*b, color = vehicle_type), 
+            inherit.aes = FALSE) +
+  scale_y_continuous("Fisheries production\n(metric tons)", 
+                     sec.axis = sec_axis(~ (. - a)/b, name = "Maritime transport\n(Tonnes)")) +
+  scale_x_date("Year") +
+  scale_color_discrete(name="Sector")+
+  labs(caption = "Data sources:\nWorld bank capture fisheries production (tonnes)\nOECD Annual transport trends")+
+  theme_bw()+
+  theme(
+    legend.position = "bottom"
+  )
+
+all_volume_global_ggp
+
+```
+
+
 
 ```{r load in total emissions datasets}
 
 # IEA domestic transport total emissions
 domestic_shipping_emissions <- readxl::read_excel(here::here("data/raw-data/external/IEA-Energy-End-uses-and-Efficiency-Indicators-database-Highlights-November-2023.xlsx"), sheet = "Transport - Emissions")
-
 colnames(domestic_shipping_emissions) <- c("country","vehicle_type","product","2000","2005","2010","2015","2016","2017","2018","2019","2020","2021")
-
+# Filter out Road, train and air transport
 domestic_shipping_emissions <- domestic_shipping_emissions %>%
-  filter(vehicle_type == "Total ships")
+  filter(vehicle_type == "Total ships") %>%
+  mutate(vehicle_type = gsub("Total ships","Total domestic ships", vehicle_type))
+# reshape to long form
+domestic_shipping_emissions <- reshape2::melt(
+  domestic_shipping_emissions, 
+  measure.vars = c("2000","2005","2010","2015","2016","2017","2018","2019","2020","2021"),
+  variable.name = "year",
+  value.name = "value")
+# Format columns
+domestic_shipping_emissions$year <- as.Date(
+  paste0(domestic_shipping_emissions$year,"-01-01"))
+domestic_shipping_emissions$value <- as.numeric(
+  domestic_shipping_emissions$value)
+domestic_shipping_emissions$country_code <- countrycode::countrycode(
+  domestic_shipping_emissions$country, origin = "country.name",
+  destination = "country.name"
+)
+domestic_shipping_emissions <- domestic_shipping_emissions %>%
+  select(country,country_code, vehicle_type, product, year, value)
+domestic_shipping_emissions$dataset <- paste("IEA domestic transport")
 
-domestic_shipping_emissions <- reshape2::melt(domestic_shipping_emissions, 
-                                     measure.vars = c("2000","2005","2010","2015","2016","2017","2018","2019","2020","2021"),
-                                     variable.name = "year",
-                                     value.name = "value")
-
-domestic_shipping_emissions$year <- as.Date(paste0(domestic_shipping_emissions$year,"-01-01"))
-domestic_shipping_emissions$value <- as.numeric(domestic_shipping_emissions$value)
 
 
 # OECD Maritime transport CO2 emissions
 # https://data-explorer.oecd.org/vis?tm=ship&pg=0&snb=24&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_MARITIME_TRANSPORT%40DF_MARITIME_TRANSPORT&df[ag]=OECD.SDD.NAD.SEEA&df[vs]=1.0&pd=2022-01%2C&dq=.M......ALL_VESSELS&ly[rw]=REF_AREA&ly[cl]=TIME_PERIOD&to[TIME_PERIOD]=false
+oecd_maritime_emissions <- read.csv(
+  here::here("data/raw-data/external/OECD_maritime-transport-CO2-emissions.csv")
+)
+# Format columns
+oecd_maritime_emissions <- oecd_maritime_emissions %>%
+  mutate(
+    country = Reference.area,
+    country_code = countrycode::countrycode(Reference.area, origin = "country.name",
+                          destination = "country.name"),
+    vehicle_type = gsub("All vessels","Total ships", Vessel),
+    product = "Total final emissions (MtCO2)",
+    year = as.Date(paste0(TIME_PERIOD,"-01")),
+    value = OBS_VALUE/1000000 #*0.907185 # Convert Tonnes to Mt?
+    ) %>%
+  filter(!is.na(year)) %>% # NA values are yearly totals
+  select(country,country_code, vehicle_type, product, year, value)
+oecd_maritime_emissions$dataset <- paste("OECD maritime emissions")
 
+# Fishing total emissions - Greer et al 2019 Fig 2
+
+
+
+## Combine emissions datasets
+all_emissions_df <- rbind(
+  domestic_shipping_emissions,
+  oecd_maritime_emissions
+)
+# Group all countries together to get wold value
+all_emissions_global_df <- all_emissions_df %>%
+  filter(country %in% c("IEA Total", "World") &
+           vehicle_type %in% c("Total domestic ships", "Total ships"))
+# Plot
+all_emissions_global_ggp <- ggplot(all_emissions_global_df, aes(x=year, y = value))+
+  geom_line(aes(color = dataset)) +
+  labs(
+    x = "Year",
+    y = "Mt CO2",
+    color = "Dataset",
+    caption = "breakdown by vessel type available for OECD dataset"
+  )+
+  theme_bw()+
+  theme(
+    legend.position = "bottom"
+  )
+
+all_emissions_global_ggp
 ```
 
-``````{r load in total volume datasets i.e. tonnes}
-
-# OECD Annual container transport (tonnes) 
-# https://data-explorer.oecd.org/vis?df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_TRENDS%40DF_TRENDSCONT&df[ag]=OECD.ITF&df[vs]=1.0&lo=5&lom=LASTNPERIODS&dq=.A.....&to[TIME_PERIOD]=false
-
-
-# OECD Annual transport trends (tonnes)
-# https://data-explorer.oecd.org/vis?tm=ship&pg=0&snb=24&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_TRENDS%40DF_TRENDS&df[ag]=OECD.ITF&df[vs]=1.0&pd=1970%2C2022&dq=.A.CONTAINER%2BFREIGHT.TKM%2BT.COASTAL%2BMAR..&ly[rw]=REF_AREA&ly[cl]=TIME_PERIOD&ly[rs]=MEASURE%2CUNIT_MEASURE&to[TIME_PERIOD]=false
-
-
-# World bank capture fisheries production (tonnes)
-# https://data.worldbank.org/indicator/ER.FSH.CAPT.MT
-
-```
 
 
 
@@ -339,17 +514,11 @@ ggplot(domestic_shipping_efficiency, aes(year, carbon_intensity_gCO2_per_tkm))+
 
 
 # Fishing Emissions intensity - Greer et al 2019
-dat <- metaDigitise::metaDigitise(dir=here::here("data/raw-data/external"), summary = FALSE)
-
-greer_industrial <- dat$scatterplot$`Greer-et-al-2019_emissions-intensity-figure.jpg`
-greer_industrial <- greer_industrial %>%
-  filter(1950 <= x & 0 <= y)
-
-save(greer_industrial, file= here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_industrial.RData"))
+# For extraction code using metadigitize see version of file 0.2.1
+greer_industrial <- load(here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_industrial.RData"))
 
 
 
-  
 
 
 # Join dataframes
@@ -373,9 +542,10 @@ ggplot(fishing_efficiency_dat, aes(year, y))+
 
 
 
+
 ```
 
-How to compare trends between total volume and efficiency?
+
 
 
 
