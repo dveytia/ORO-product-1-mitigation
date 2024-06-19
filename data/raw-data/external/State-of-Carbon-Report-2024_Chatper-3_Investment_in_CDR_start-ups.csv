@@ -1,0 +1,12 @@
+Model,Scenario,Region,Variable,Unit,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|All Net-Zero Initiatives|Funding,billion USD,,,,,,,6.463696675,8.880232377,13.240671172,24.493575486,35.598381673,50.574619894,115.247791239,132.693896858,114.633399093
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Biochar,billion USD,0,0,0,0,0,0.000665819,0.006781903,0.002243954,0.011435252,0.002687053,0.00229024,0.001346155,0.024085915,0.070911765,0.234277925
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Bioenergy with CCS,billion USD,0,0,0,0,0,0,0,0,0.000080213,0.000550649,0,0.00023068,0.013175659,0.00009,0
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Biomass Burial,billion USD,0,0,0,0,0,0,0,0.000262757,0,0,0.012,0,0.020603067,0.007205,0.0091
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Biomass Sinking,billion USD,0.0005,0,0,0.000986409,0,0,0,0,0.002747,0.0087,0.003297286,0.006455372,0.000381247,0.017363137,0.017118227
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Direct Air Capture with CCS,billion USD,0,0.0295,0.001875243,0.002517375,0.001510413,0.00339685,0.002847989,0.006898292,0.02,0.04482661,0.089301466,0.15628811,0.184126748,0.807728326,0.158015141
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Direct Ocean Capture,billion USD,0,0,0,0,0,0,0,0,0,0,0,0,0.017327007,0.0015,0.080854747
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Enhanced Weathering,billion USD,0,0,0,0,0,0,0,0,0,0.000005744,0,0.00025,0.014406,0.074175943,0.042222338
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Forestry,billion USD,0.002,0,0,0,0.00282396,0.0015,0.01743129,0.001944569,0.057486857,0.018867063,0.009726191,0.187476769,0.449085051,0.424302059,0.190207413
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Ocean Alkalinity Enhancement,billion USD,0,0,0,0,0,0,0,0,0.000025,0,0,0.0006,0.0032,0.071920182,0.021712602
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Funding|Soil Carbon Sequestration,billion USD,0,0,0,0,0,0,0,0,0,0.00001,0,0.01004,0.048592825,0.019289983,0.102507089

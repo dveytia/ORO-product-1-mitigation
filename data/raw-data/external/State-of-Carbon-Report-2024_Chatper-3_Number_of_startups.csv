@@ -1,0 +1,11 @@
+Model,Scenario,Region,Variable,Unit,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Biochar,,1,,2,1,,4,1,5,10,4,,10,9,5,1
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Bioenergy with CCS,,,,,1,,,1,1,1,,,1,,,
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Biomass Burial,,,,,,,,1,,,,1,1,1,,1
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Biomass Sinking,,,,,,2,1,,,,1,,2,6,,
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Direct Air Capture with CCS,,2,3,,,2,2,1,,2,4,7,10,15,18,2
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Direct Ocean Capture,,,,,,,,,,,,1,1,2,3,
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Enhanced Weathering,,,,1,,,,,,,,3,3,4,5,2
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Forestry,,2,9,5,5,10,9,7,17,18,35,33,41,38,23,6
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Ocean Alkalinity Enhancement,,,,,,,,,,1,,3,,2,3,1
+State of CDR (2024) - Demonstration and Upscaling,Observed Data,World,Start-Up|Removal|Number of Firms|Soil Carbon Sequestration,,,,,,,,,2,1,3,3,1,1,3,1

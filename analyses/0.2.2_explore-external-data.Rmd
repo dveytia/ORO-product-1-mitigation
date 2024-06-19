@@ -17,6 +17,8 @@ library(rnaturalearth)
 library(egg)
 #countries <- map_data("world")
 
+## Source functions
+source(here::here("R/Display_color_scales.R"))
 ```
 
 ```{r method 1 to get robinson projection too much fuss, eval = FALSE}
@@ -356,51 +358,31 @@ wb_capture_fisheries_global <- wb_capture_fisheries %>%
 
 
 
-## Combine Volume datasets
-all_volume_df <- rbind(
-  oecd_transport_trends_global %>%
-    select(vehicle_type, product, year, value),
-  wb_capture_fisheries_global %>%
-    select(vehicle_type, product, year, value)
-)
-# Plot
-all_volume_global_ggp <- ggplot(all_volume_df, aes(x=year, y = value))+
-  geom_line(aes(color = vehicle_type)) +
-  labs(
-    x = "Year",
-    y = "Tonnes",
-    color = "Dataset"
-  )+
-  theme_bw()+
-  theme(
-    legend.position = "bottom"
-  )
 
-all_volume_global_ggp
+## Plot and scale on second axis
+source(here::here("R/my_sec_axis_lineplot.R"))
 
-# Plot and scale on second axis
-ylim.prim <- range(oecd_transport_trends_global$value, na.rm = T)   
-ylim.sec <- range(wb_capture_fisheries_global$value, na.rm = T)
-b <- diff(ylim.prim)/diff(ylim.sec)
-a <- ylim.prim[1] - b*ylim.sec[1]
-
-all_volume_global_ggp <- ggplot(oecd_transport_trends_global, 
-                                aes(year, value, color = vehicle_type)) +
-  geom_line() +
-  geom_line(data = wb_capture_fisheries_global,
-            aes(x=year, y = a + value*b, color = vehicle_type), 
-            inherit.aes = FALSE) +
-  scale_y_continuous("Fisheries production\n(metric tons)", 
-                     sec.axis = sec_axis(~ (. - a)/b, name = "Maritime transport\n(Tonnes)")) +
+# Set color scale
+volume_col_brks <- c("Capture fisheries","Container","Freight")
+volume_col_labs <- c("Fisheries","Shipping:\ncontainer","Shipping:\nFreight")
+volume_col_pal <- Tol_muted[c(2,7,8)]
+# Format data for functoin
+dat1 <- oecd_transport_trends_global %>%
+  rename(x_axis = year, col_var = vehicle_type)
+dat2 <- wb_capture_fisheries_global %>%
+  rename(x_axis = year, col_var = vehicle_type)
+# Plot using function
+all_volume_global_ggp <- my_sec_axis_lineplot(dat.prim = dat1, dat.sec = dat2, name.prim = "Fisheries production\n(metric tons)", name.sec = "Maritime transport\n(Tonnes)",lwd = 1)
+# Add additional aesthetics
+all_volume_global_ggp <- all_volume_global_ggp+
   scale_x_date("Year") +
-  scale_color_discrete(name="Sector")+
+  scale_color_manual(name="Sector",values = volume_col_pal, breaks = volume_col_brks, labels = volume_col_labs)+
   labs(caption = "Data sources:\nWorld bank capture fisheries production (tonnes)\nOECD Annual transport trends")+
-  theme_bw()+
   theme(
     legend.position = "bottom"
   )
-
 all_volume_global_ggp
+  
 
 ```
 
@@ -469,14 +451,21 @@ all_emissions_df <- rbind(
 all_emissions_global_df <- all_emissions_df %>%
   filter(country %in% c("IEA Total", "World") &
            vehicle_type %in% c("Total domestic ships", "Total ships"))
+
+# Set colors
+emis_col_brks <- c("IEA domestic transport","OECD maritime emissions")
+emis_col_labs <- c("Shipping:\nDomestic","Shipping:\nAll maritime")
+emis_col_pal <- Tol_muted[c(7,8)]
+
 # Plot
 all_emissions_global_ggp <- ggplot(all_emissions_global_df, aes(x=year, y = value))+
-  geom_line(aes(color = dataset)) +
+  geom_line(aes(color = dataset), linewidth = 1) +
+  scale_x_date(name = "Year", limits = as.Date(c("1960-01-01","2023-01-01")))+
+  scale_color_manual(name = "Sector", values = emis_col_pal, breaks = emis_col_brks, labels = emis_col_labs)+
   labs(
-    x = "Year",
     y = "Mt CO2",
-    color = "Dataset",
-    caption = "Breakdown by vessel type available for OECD dataset,\ntransformed Tonnes to Mt by dividing by 1,000,000\nIEA data is the free highlights version (every 5 years)\nMissing Fisheries emissions from Greer et al 2019"
+    color = "Sector",
+    caption = "Data Source:\nAll maritime: OECD Maritime transport CO2 emissions\n(breakdown by vessel type available,\ntransformed Tonnes to Mt by dividing by 1,000,000)\nDomestic: IEA Energy End uses and Efficiency Indicators Highlights\nMissing Fisheries emissions from Greer et al 2019"
   )+
   theme_bw()+
   theme(
@@ -484,6 +473,7 @@ all_emissions_global_ggp <- ggplot(all_emissions_global_df, aes(x=year, y = valu
   )
 
 all_emissions_global_ggp
+
 ```
 
 
@@ -494,22 +484,16 @@ all_emissions_global_ggp
 # Fuel coefficient (engine efficiency) - Greer et al 2019
 greer_FC <- readxl::read_excel(here::here("data/raw-data/external/Greer-et-al-2019_fuel-coefficient-table-5.xlsx"), sheet = "fuel_coefficient")
 greer_FC <- greer_FC %>%
-  mutate(variable = "Fuel coefficient") %>%
-  rename(y=fuel_coefficient)%>%
-  select(variable, year, y)
+  mutate(col_var = "Fuel coefficient", x_axis = as.Date(paste0(year, "-01-01"))) %>%
+  rename(value=fuel_coefficient)%>%
+  select(col_var, x_axis, value)
 
 
-# IEA domestic transport shipping energy efficiency 
+# IEA domestic freight transport energy efficiency (gCO2/tkm)
 # https://www.iea.org/data-and-statistics/data-product/energy-efficiency-indicators
 domestic_shipping_efficiency <- readxl::read_excel(here::here("data/raw-data/external/IEA-shipping-energy-efficiency.xlsx"), sheet = "Data")
 domestic_shipping_efficiency$year <- as.Date(paste0(domestic_shipping_efficiency$year,"-01-01"))
 
-ggplot(domestic_shipping_efficiency, aes(year, carbon_intensity_gCO2_per_tkm))+
-  geom_line()+
-  geom_point()+
-  scale_x_date()+
-  labs(y="Shipping energy efficiency (gCO2/tkm)", caption = "source: IEA energy end uses and efficiency indicators database (domestic shipping)")+
-  theme_bw()
 
 
 # Fishing Emissions intensity - Greer et al 2019
@@ -520,53 +504,93 @@ load(here::here("data/raw-data/external/Greer-et-al-2019_emissions-intensity_ind
 
 
 
-# Join dataframes
-fishing_efficiency_dat <- greer_industrial %>%
-  mutate(year = round(x)) %>%
-  mutate(variable = "Emissions intensity (tCO2/tcatch)") %>%
-  select(variable, year, y) 
-  
-fishing_efficiency_dat <- rbind(fishing_efficiency_dat,greer_FC)
-fishing_efficiency_dat$year <- as.Date(paste0(fishing_efficiency_dat$year,"-01-01"))
+## Plot and scale on second axis
+source(here::here("R/my_sec_axis_lineplot.R"))
 
-
-ggplot(fishing_efficiency_dat, aes(year, y))+
-  geom_line()+
-  facet_grid(variable ~., scales = "free_y", labeller = label_wrap_gen())+
-  scale_x_date()+
-  labs(x="Year",y="Value",
-       caption = paste(strwrap("Source: Fig 3 and Table 5from Greer et al 2019, https://doi.org/10.1016/j.marpol.2018.12.001",width = 50), collapse = "\n"))+
-  theme_bw()
-
-
-
-
+# Set color scale
+eff_col_brks <- c("Fishing:\nIndustrial","Shipping:\nDomestic", "Fuel coefficient")
+eff_col_labs <- c("Fishing:\nIndustrial","Shipping:\nDomestic","Fuel efficiency\ncoefficient")
+eff_col_pal <- Tol_muted[c(2,7,5)]
+# Format data for functoin
+eff_dat1 <- domestic_shipping_efficiency %>%
+  rename(x_axis = year) %>%
+  mutate(col_var = "Shipping:\nDomestic", value = 1/carbon_intensity_gCO2_per_tkm) %>%
+  arrange(x_axis)
+eff_dat2 <- greer_industrial %>%
+  mutate(x_axis = as.Date(paste0(round(x),"-01-01")),
+         col_var = "Fishing:\nIndustrial", value = 1/y) %>%
+  arrange(x_axis)
+# Plot using function
+all_efficiency_global_ggp <- my_sec_axis_lineplot(dat.prim = eff_dat1, dat.sec = eff_dat2, name.prim = "Shipping efficiency\n(tkm/gCO2)", name.sec = "Fishing efficiency\n(tcatch/tCO2)",lwd = 1)
+# Add a lineplot for fuel coefficient
+all_efficiency_global_ggp <- all_efficiency_global_ggp +
+  geom_line(data = greer_FC, 
+            aes(x_axis, scales::rescale(1/value, to = range(eff_dat1$value, na.rm=T)), 
+                color = col_var), linewidth = 1)
+# Add additional aesthetics
+all_efficiency_global_ggp <- all_efficiency_global_ggp +
+  scale_x_date("Year",limits = c(as.Date(c("1960-01-01","2023-01-01")))) +
+  scale_color_manual(name="Sector",values = eff_col_pal, breaks = eff_col_brks, labels = eff_col_labs)+
+  labs(caption = "Data sources:\nDomestic shipping: IEA energy end uses and efficiency indicators database\nFishing (Industrial): Greer et al 2019 Fig 3\nFuel coefficient: inverse of fuel coefficient from Greer et al 2019 Table 5")+
+  theme(
+    legend.position = "bottom"
+  )
+all_efficiency_global_ggp
 
 ```
 
 
+```{r combine all increasing efficiency plots}
+require(egg)
+
+
+eff_plots <- ggarrange(
+  plots = list(
+    all_volume_global_ggp+ 
+      theme(plot.margin=unit(c(1,0.5,0.5,0.1), 'cm')),
+    all_emissions_global_ggp+ 
+      theme(plot.margin=unit(c(1,0.5,0.5,0.1), 'cm')),
+    all_efficiency_global_ggp+
+      theme(plot.margin=unit(c(1,0.5,0.5,0.1), 'cm'))),
+  nrow=3, 
+  labels = c("a. Volume indicators", 
+             "b. Emissions indicators",
+             "c. Efficiency indicators"
+             ),
+          label.args = list(gp = grid::gpar(font = 4, cex = 1.2)),
+          newpage = FALSE, draw=FALSE)
 
 
 
-# Novel CDR deployments - State of CDR Report 2022
+ggsave(here::here("figures/2024-07-01_expert-panel-meeting/Efficiency_deployment_figures.pdf"),
+       eff_plots, height = 12, width = 6, units = 'in')
+```
 
-```{r load in novel CDR deployment data}
-cdr_deployment <- readxl::read_excel(here::here("data/raw-data/external/State-of-Carbon-Report-2022-Novel-CDR-Deployment-Data.xlsx"), skip = 1)
 
-carbon_sinks <- unique(do.call(c, unique(as.vector(cdr_deployment[,3:6]))))
+# mCDR deployments 
+
+```{r Gattuso 2018 - ocean iron fertilisation experiments km2 - STILL NEED}
+
+
+```
+
+```{r State of CDR report - gross removals tCO2 per year}
+gross_removals_df <- readxl::read_excel(here::here("data/raw-data/external/State-of-Carbon-Report-2022-Novel-CDR-Deployment-Data.xlsx"), skip = 1)
+
+carbon_sinks <- unique(do.call(c, unique(as.vector(gross_removals_df[,3:6]))))
 carbon_sinks
 
-cdr_deployment$carbon_sink <- apply(cdr_deployment[,3:6], 1, paste, collapse=", ")
-cdr_deployment <- cdr_deployment %>%
+gross_removals_df$carbon_sink <- apply(gross_removals_df[,3:6], 1, paste, collapse=", ")
+gross_removals_df <- gross_removals_df %>%
   mutate(ocean = ifelse(
     grepl("Aquatic", carbon_sink) | grepl("Deep Ocean", carbon_sink)| 
       grepl("Dissolved CO2", carbon_sink) | grepl("Bicarbonate", carbon_sink), TRUE,FALSE
   ))
-cdr_deployment$year = as.Date(paste0(cdr_deployment$`Year active`,"-01-01")) 
+gross_removals_df$year = as.Date(paste0(gross_removals_df$`Year active`,"-01-01")) 
 
-summary(cdr_deployment)
+summary(gross_removals_df)
 
-cdr_deployment %>%
+gross_removals_df %>%
   filter(ocean) %>%
   group_by(year) %>%
   summarise(`Gross Removals\n(tCO2/year)` = sum(`Gross Removals\n(tCO2/year)`, na.rm=T)) %>%
@@ -580,74 +604,346 @@ cdr_deployment %>%
   theme_bw()
 ```
 
-```{r Ocean Visions mCDR Field Trials}
-mCDR_field <- readxl::read_excel(here::here("data/raw-data/external/Ocean-visions-mCDR-field-trial-database.xlsx"),
-                                 sheet = "Data")
-mCDR_field_summary <- mCDR_field %>%
+
+```{r State of CDR report - number of active grants - consider removing}
+# data downloaded from: https://portal.stateofcdr.org/chapter/2
+
+active_grants_df <- read.csv(here::here("data/raw-data/external/State-of-Carbon-Report-2024_Chatper-2_Number_of_active_grants.csv"))
+
+# Format dataframe into long form, and present metric as total number of projects rather than %
+colnames(active_grants_df)[6:28] <- gsub("X","",colnames(active_grants_df)[6:28])
+active_grants_df <- active_grants_df %>%
+  select(-c(Model, Scenario, Region, Unit))
+active_grants_df <- active_grants_df %>%
+  filter(Variable %in% c("Research|Removal|Active Grants", "Research|Removal|Active Grants|Coastal Wetland Restoration [Share]", "Research|Removal|Active Grants|Ocean Alkalinity Enhancement [Share]", "Research|Removal|Active Grants|Ocean Fertilization [Share]"))
+active_grants_df <- reshape2::melt(active_grants_df, 
+                                   id.vars = c("Variable"), 
+                                   variable.name = "year", 
+                                   value.name = "value")
+active_grants_df$year <- as.Date(paste0(active_grants_df$year,"-01-01"))
+
+
+active_grants_total <- active_grants_df %>%
+  filter(Variable == "Research|Removal|Active Grants") %>%
+  rename(total_grants = value) %>%
+  select(-c(Variable))
+active_grants_df <- active_grants_df %>%
+  filter(Variable != "Research|Removal|Active Grants") %>%
+  left_join(active_grants_total, by = "year") %>%
+  mutate(n_grants = value/100*total_grants,
+         Variable = factor(Variable, 
+                           levels = c("Research|Removal|Active Grants|Coastal Wetland Restoration [Share]", "Research|Removal|Active Grants|Ocean Alkalinity Enhancement [Share]", "Research|Removal|Active Grants|Ocean Fertilization [Share]"),
+                           labels = c("Coastal Wetland Restoration", "Ocean Alkalinity Enhancement", "Ocean Fertilization"))) %>%
+  select(-c(value, total_grants)) %>%
+  rename(value = n_grants)
+  
+  
+head(active_grants_df)
+```
+
+
+```{r State of CDR report - number of patents}
+# data downloaded from: https://portal.stateofcdr.org/chapter/2
+
+patents_df <- read.csv(here::here("data/raw-data/external/State-of-Carbon-Report-2024_Chatper-2_Number_of_patents.csv"))
+
+# Format dataframe into long form
+colnames(patents_df)[6:28] <- gsub("X","",colnames(patents_df)[6:28])
+patents_df <- patents_df %>%
+  select(-c(Model, Scenario, Region, Unit))
+
+patents_df <- patents_df %>%
+  filter(Variable %in% c("Research|Removal|Patents|Coastal Wetland Restoration", "Research|Removal|Patents|Ocean Alkalinity Enhancement","Research|Removal|Patents|Ocean Fertilization"))
+
+patents_df <- reshape2::melt(patents_df, 
+                                   id.vars = c("Variable"), 
+                                   variable.name = "year", 
+                                   value.name = "value")
+patents_df$year <- as.Date(paste0(patents_df$year,"-01-01"))
+
+patents_df <- patents_df %>%
+  mutate(Variable = factor(Variable, 
+                           levels = c("Research|Removal|Patents|Coastal Wetland Restoration", "Research|Removal|Patents|Ocean Alkalinity Enhancement","Research|Removal|Patents|Ocean Fertilization"),
+                           labels = c("Coastal Wetland Restoration", "Ocean Alkalinity Enhancement", "Ocean Fertilization")))
+  
+  
+head(patents_df)
+```
+
+```{r State of CDR report - investment in startups}
+# # https://portal.stateofcdr.org/chapter/3
+# # CDR start-ups are defined here as start-ups related to the capture of CO₂ from the atmosphere. This analysis examines the state of investments in CDR start-ups through December 31, 2023, using the Net-Zero Insights (NZI) database, which contains a total of 509 CDR start-ups.
+# 
+# startups_df <- read.csv(here::here("data/raw-data/external/State-of-Carbon-Report-2024_Chatper-3_Number_of_startups.csv"))
+# 
+# # Format dataframe into long form
+# colnames(startups_df)[6:20] <- gsub("X","",colnames(startups_df)[6:20])
+# startups_df <- startups_df %>%
+#   select(-c(Model, Scenario, Region, Unit))
+# 
+# startups_df <- startups_df %>%
+#   filter(Variable %in% c("Start-Up|Removal|Number of Firms|Direct Ocean Capture", "Start-Up|Removal|Number of Firms|Ocean Alkalinity Enhancement"))
+# 
+# startups_df <- reshape2::melt(startups_df, 
+#                                    id.vars = c("Variable"), 
+#                                    variable.name = "year", 
+#                                    value.name = "value")
+# startups_df$year <- as.Date(paste0(startups_df$year,"-01-01"))
+# 
+# startups_df <- startups_df %>%
+#   mutate(Variable = factor(Variable, 
+#                            levels = c("Start-Up|Removal|Number of Firms|Direct Ocean Capture", "Start-Up|Removal|Number of Firms|Ocean Alkalinity Enhancement"),
+#                            labels = c("Direct Ocean Capture", "Ocean Alkalinity Enhancement")))
+#   
+# head(startups_df)
+# summary(startups_df)
+
+
+
+## Investment in startups
+# Dollar value of investments in CDR start-ups from 2009-2023 (208 total start-ups and 511 deals that report a dollar value, bars) 
+startup_investments_df <- read.csv(here::here("data/raw-data/external/State-of-Carbon-Report-2024_Chatper-3_Investment_in_CDR_start-ups.csv"))
+
+# Format dataframe into long form
+colnames(startup_investments_df)[6:20] <- gsub("X","",colnames(startup_investments_df)[6:20])
+startup_investments_df <- startup_investments_df %>%
+  select(-c(Model, Scenario, Region, Unit))
+
+startup_investments_df <- startup_investments_df %>%
+  filter(Variable %in% c("Start-Up|Removal|Funding|Biomass Sinking", "Start-Up|Removal|Funding|Direct Ocean Capture", "Start-Up|Removal|Funding|Ocean Alkalinity Enhancement"))
+
+startup_investments_df <- reshape2::melt(startup_investments_df, 
+                                   id.vars = c("Variable"), 
+                                   variable.name = "year", 
+                                   value.name = "value")
+startup_investments_df$year <- as.Date(paste0(startup_investments_df$year,"-01-01"))
+
+startup_investments_df <- startup_investments_df %>%
+  mutate(Variable = factor(Variable, 
+                           levels = c("Start-Up|Removal|Funding|Biomass Sinking", "Start-Up|Removal|Funding|Direct Ocean Capture", "Start-Up|Removal|Funding|Ocean Alkalinity Enhancement"),
+                           labels = c("Biomass Sinking","Direct Ocean Capture", "Ocean Alkalinity Enhancement")))
+  
+  
+head(startup_investments_df)
+summary(startup_investments_df)
+
+```
+
+
+
+
+```{r Ocean Visions - N Field Trials}
+mCDR_field <- readxl::read_excel(here::here("data/raw-data/external/Ocean-visions-mCDR-field-trial-database.xlsx"),sheet = "Data")
+
+# Clean data
+mCDR_field$`Start of Pilot` <- replace(mCDR_field$`Start of Pilot`, mCDR_field$`Start of Pilot` %in% c("5.12.2023","2023"),
+        as.numeric(as.Date("2023-01-01")))
+
+# Format
+n_field_trials_df <- mCDR_field %>%
   filter(!is.na(`Start of Pilot`)) %>%
   group_by(`Start of Pilot`) %>%
   summarise(
-    n_projects = n(),
-    planned_seq = sum(as.numeric(`Planned Sequestration (tons CO2)`), na.rm = T)
+    value = n()
   ) %>%
   mutate(year = as.Date(as.numeric(`Start of Pilot`), origin = "1899-12-30")) %>%
+  mutate(year = ifelse(year == as.Date("1952-12-30"), as.Date("2023-01-01"), year)) %>%
   arrange(year) %>%
-  mutate(cumulative_projects = cumsum(n_projects),
-         cumulative_seq = cumsum(planned_seq))
+  mutate(year = as.Date(year, origin = as.Date("1970-01-01")))
+
   
+summary(n_field_trials_df)
 
-mCDR_field_summary <- reshape2::melt(mCDR_field_summary, measure.vars = c("cumulative_projects", "cumulative_seq"),
-                                     id.vars = "year")
-
-mCDR_field_summary$variable <- factor(mCDR_field_summary$variable,
-                                      levels = c("cumulative_projects", "cumulative_seq"),
-                                      labels = c("Projects (N)","Planned sequestration (tCO2)"))
-summary(mCDR_field_summary)
-
-ggplot(mCDR_field_summary, aes(year, value))+
-  facet_grid(variable ~., scales = "free_y", labeller = label_wrap_gen(width = 25))+
-  geom_line()+
-  labs(y = "Cumulative value", caption = "Source: Ocean Visions mCDR field trials database")+
-  scale_x_date(limits = c(as.Date("2018-01-01"), max(mCDR_field_summary$year)))+
-  theme_bw()
 ```
 
 
-
-# Blue carbon
-
-## Duarte et al 2020 BC Restoration projects
 
 Source: Duarte, Carlos Manuel; Devassy, R P; Predragovic, M; Valuzzi, L; Parry, A; Hughes, Terry P (2020): Data set on restoration projects of coastal marine habitats reported worldwide [dataset]. PANGAEA, https://doi.org/10.1594/PANGAEA.912232. Accessed 24-04-2020
 
-```{r}
+```{r Duarte et al 2020 - BC Restoration projects}
 bc_restoration <- readxl::read_excel(here::here("data/raw-data/external/Duarte2020RestorationDataSet-1.xlsx"),
                                      sheet = "Data")
 
-bc_restoration %>%
-  group_by(Habitat, Year) %>%
-  summarise(n_projects = n()) %>%
-  ungroup() %>% 
-  tidyr::complete(Habitat, Year, fill = list(n_projects = 0)) %>%
-  arrange(Habitat, Year) %>%
-  group_by(Habitat) %>%
-  mutate(year = as.Date(paste0(Year, "-01-01")),
-         cumulative_projects = cumsum(n_projects)) %>%
-  filter(Habitat != "Coral Reefs") %>%
-  ggplot(aes(year, cumulative_projects, col = Habitat, fill = Habitat))+
-  geom_area(position = "stack", alpha = 0.5)+
-  labs(y = "Cumulative restoration projects (N)", x="Year",
-       caption = "Source: Duarte et al (2020), doi: https://doi.org/10.1594/PANGAEA.912232")+
-  scale_x_date()+
-  theme_bw()+
-  theme(legend.position = "bottom")
-
+# Truncate data
+bc_restoration$year <- as.Date(paste0(bc_restoration$Year, "-01-01"))
+bc_restoration <- bc_restoration %>%
+  filter(as.Date("1990-01-01") <= year)
 ```
 
 
 
 
+```{r combine all mcdr plots}
 
+# Set common date range for all plots
+ylim_date <- range(c(gross_removals_df$year[gross_removals_df$ocean],
+                     patents_df$year,
+                     startup_investments_df$year,
+                     n_field_trials_df$year,
+                     bc_restoration$year), na.rm = TRUE)
+
+
+# Gross CO2 removals
+gross_removals_ggp <- gross_removals_df %>%
+  filter(ocean) %>%
+  group_by(year) %>%
+  summarise(`Gross Removals\n(tCO2/year)` = sum(`Gross Removals\n(tCO2/year)`, na.rm=T)) %>%
+  mutate(`Gross Removals\n(tCO2/year)` = cumsum(`Gross Removals\n(tCO2/year)`)) %>%
+  ggplot(aes(year, `Gross Removals\n(tCO2/year)`))+
+  geom_line(linewidth=1)+
+  #geom_point()+
+  scale_x_date(name = "Year", limits = ylim_date)+
+  labs(y = "Gross Removals (tCO2/year)\n(Cumulative)")+
+  theme_bw()+
+  theme(
+    # axis.line.x = element_blank(),
+    # axis.text.x = element_blank(),
+    # axis.title.x = element_blank(),
+    # axis.ticks.x = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+gross_removals_ggp
+
+# Patents
+patents_ggp <- patents_df %>%
+  group_by(Variable) %>%
+  arrange(year) %>%
+  mutate(cum_value = cumsum(value)) %>%
+  ggplot(aes(year, cum_value))+
+  geom_line(aes(color = Variable), linewidth = 1)+
+  labs(y = "Number of patents\n(cumulative)" 
+       #caption = "Source: Ocean Visions mCDR field trials database"
+       )+
+  scale_x_date(limits = ylim_date)+
+  scale_color_manual(values = Tol_muted[1:3])+
+  theme_bw()+
+  theme(
+    axis.line.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+patents_ggp
+
+
+# Startup investments
+startup_investments_ggp <- startup_investments_df %>%
+  group_by(Variable) %>%
+  arrange(year) %>%
+  mutate(cum_value = cumsum(value)) %>%
+  ggplot(aes(year, cum_value))+
+  geom_line(aes(color = Variable), linewidth = 1)+
+  labs(y = "Billion USD invested in start-ups\n(cumulative)" 
+       #caption = "Source: Ocean Visions mCDR field trials database"
+       )+
+  scale_x_date(limits = ylim_date)+
+  scale_color_manual(values = Tol_muted[1:3])+
+  theme_bw()+
+  theme(
+    axis.line.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+startup_investments_ggp
+
+
+
+# Number of field trials -- 
+field_trials_ggp <- n_field_trials_df %>%
+  arrange(year) %>%
+  mutate(cum_value = cumsum(value)) %>%
+  ggplot(aes(year, cum_value))+
+  geom_line(linewidth = 1)+
+  labs(y = "Number of field trials\n(cumulative)" 
+       #caption = "Source: Ocean Visions mCDR field trials database"
+       )+
+  scale_x_date(limits = ylim_date)+
+  theme_bw()+
+  theme(
+    axis.line.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+field_trials_ggp
+
+
+# Number of blue carbon projects
+bc_restoration_ggp <- bc_restoration %>%
+  group_by(Habitat, year) %>%
+  summarise(n_projects = n()) %>%
+  ungroup() %>% 
+  tidyr::complete(Habitat, year, fill = list(n_projects = 0)) %>%
+  arrange(Habitat, year) %>%
+  group_by(Habitat) %>%
+  mutate(cumulative_projects = cumsum(n_projects)) %>%
+  filter(Habitat != "Coral Reefs") %>%
+  ggplot(aes(year, cumulative_projects, col = Habitat))+
+  geom_area(position = "stack", linewidth=1, fill=NA)+
+  labs(y = "Number restoration projects\n(Cumulative)", x="Year")+
+  scale_x_date()+
+  theme_bw()+
+  theme(
+    axis.line.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+  
+
+
+
+## Plot together
+require(egg)
+
+mcdr_ggp <- ggarrange(
+  plots = list(
+    patents_ggp+ 
+      theme(plot.margin=unit(c(0.1,0.5,0.5,0.1), 'cm',),
+            axis.title.y = element_text(size = 10),
+            legend.text = element_text(size = 6)),#+
+      #guides(color = guide_legend(nrow=2)),
+    startup_investments_ggp+ 
+      theme(plot.margin=unit(c(0.1,0.5,0.5,0.1), 'cm'),
+            axis.title.y = element_text(size = 10),
+            legend.text = element_text(size = 6)),
+    field_trials_ggp+ 
+      theme(plot.margin=unit(c(0.1,0.5,0.5,0.1), 'cm'),
+            axis.title.y = element_text(size = 10),
+            legend.text = element_text(size = 6)),
+    bc_restoration_ggp+ 
+      theme(plot.margin=unit(c(0.1,0.5,0.5,0.1), 'cm'),
+            axis.title.y = element_text(size = 10),
+            legend.text = element_text(size = 6),
+            legend.key.size = unit(0.3,"cm")),
+    gross_removals_ggp+ 
+      theme(plot.margin=unit(c(0.1,0.5,0.5,0.1), 'cm'),
+            axis.title.y = element_text(size = 10),
+            legend.text = element_text(size = 6))
+  ),
+  nrow=5, 
+  # labels = c("a. Volume indicators", 
+  #            "b. Emissions indicators",
+  #            "c. Efficiency indicators"
+  #            ),
+          #label.args = list(gp = grid::gpar(font = 4, cex = 1.2)),
+          newpage = FALSE, draw=FALSE
+)
+
+
+
+
+ggsave(here::here("figures/2024-07-01_expert-panel-meeting/mCDR_deployment_figures.pdf"),
+       mcdr_ggp, height = 12, width = 5, units = 'in')
+```
 
 
 
