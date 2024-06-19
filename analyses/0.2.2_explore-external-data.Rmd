@@ -570,6 +570,13 @@ ggsave(here::here("figures/2024-07-01_expert-panel-meeting/Efficiency_deployment
 # mCDR deployments 
 
 ```{r Gattuso 2018 - ocean iron fertilisation experiments km2 - STILL NEED}
+oif_df <- readxl::read_excel(here::here("data/raw-data/external/OIF_data.xlsx"))
+
+oif_df <- oif_df %>%
+  filter(!is.na(Year)) %>%
+  mutate(year = as.Date(paste0(Year,"-01-01"))) %>%
+  group_by(year) %>%
+  summarise(value = sum(`Total Size`, na.rm=T))
 
 
 ```
@@ -780,6 +787,7 @@ ylim_date <- range(c(gross_removals_df$year[gross_removals_df$ocean],
                      patents_df$year,
                      startup_investments_df$year,
                      n_field_trials_df$year,
+                     oif_df$year,
                      bc_restoration$year), na.rm = TRUE)
 
 
@@ -873,6 +881,35 @@ field_trials_ggp <- n_field_trials_df %>%
   )
 field_trials_ggp
 
+ft1 <- n_field_trials_df %>%
+  arrange(year) %>%
+  mutate(value = cumsum(value),
+         col_var = "Ocean visions field trials") %>%
+  rename(x_axis = year)
+ft2 <- oif_df %>%
+  arrange(year) %>%
+  mutate(value = cumsum(value),
+         col_var = "Ocean Fertilization") %>%
+  rename(x_axis = year)
+  
+  
+field_trials_ggp2 <- my_sec_axis_lineplot(dat.prim = ft2, dat.sec = ft1,name.sec = "N of field trials\n(cumulative)", name.prim = "Fertilized area (km2)\n(cumulative)")
+field_trials_ggp2 <- field_trials_ggp2 +
+  scale_color_manual(values = Tol_muted[c(3,6)], 
+                     breaks = c("Ocean Fertilization", "Ocean visions field trials"))+
+  scale_x_date(limits = ylim_date)+
+  theme_bw()+
+  theme(
+    axis.title.y.left = element_text(color = Tol_muted[c(3)]),
+    axis.title.y.right = element_text(color = Tol_muted[c(6)]),
+    axis.line.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+field_trials_ggp2
 
 # Number of blue carbon projects
 bc_restoration_ggp <- bc_restoration %>%
@@ -887,7 +924,7 @@ bc_restoration_ggp <- bc_restoration %>%
   ggplot(aes(year, cumulative_projects, col = Habitat))+
   geom_area(position = "stack", linewidth=1, fill=NA)+
   labs(y = "Number restoration projects\n(Cumulative)", x="Year")+
-  scale_x_date()+
+  scale_x_date(limits = ylim_date)+
   theme_bw()+
   theme(
     axis.line.x = element_blank(),
@@ -915,7 +952,7 @@ mcdr_ggp <- ggarrange(
       theme(plot.margin=unit(c(0.1,0.5,0.5,0.1), 'cm'),
             axis.title.y = element_text(size = 10),
             legend.text = element_text(size = 6)),
-    field_trials_ggp+ 
+    field_trials_ggp2+ 
       theme(plot.margin=unit(c(0.1,0.5,0.5,0.1), 'cm'),
             axis.title.y = element_text(size = 10),
             legend.text = element_text(size = 6)),
