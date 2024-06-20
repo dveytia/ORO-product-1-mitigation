@@ -17,6 +17,12 @@ library(rnaturalearth)
 library(egg)
 #countries <- map_data("world")
 
+# hack for error with coord_cartesian in ggplot
+# https://stackoverflow.com/questions/78227158/big-issue-with-ggplot2-r-and-coord-cartesian
+if(!exists("obj_is_vector")){
+  obj_is_vector = function(x){TRUE}
+}
+
 ## Source functions
 source(here::here("R/Display_color_scales.R"))
 ```
@@ -891,16 +897,22 @@ ft2 <- oif_df %>%
   mutate(value = cumsum(value),
          col_var = "Ocean Fertilization") %>%
   rename(x_axis = year)
-  
+
+
   
 field_trials_ggp2 <- my_sec_axis_lineplot(dat.prim = ft2, dat.sec = ft1,name.sec = "N of field trials\n(cumulative)", name.prim = "Fertilized area (km2)\n(cumulative)")
+
 field_trials_ggp2 <- field_trials_ggp2 +
   scale_color_manual(values = Tol_muted[c(3,6)], 
                      breaks = c("Ocean Fertilization", "Ocean visions field trials"))+
   scale_x_date(limits = ylim_date)+
   theme_bw()+
   theme(
+    axis.line.y.left = element_line(color = Tol_muted[c(3)], linewidth = 1),
+    axis.text.y.left = element_text(color = Tol_muted[c(3)]),
     axis.title.y.left = element_text(color = Tol_muted[c(3)]),
+    axis.line.y.right = element_line(color = Tol_muted[c(6)], linewidth = 1),
+    axis.text.y.right = element_text(color = Tol_muted[c(6)]),
     axis.title.y.right = element_text(color = Tol_muted[c(6)]),
     axis.line.x = element_blank(),
     axis.text.x = element_blank(),
