@@ -73,7 +73,6 @@ world_robinson |>
 # Marine renewable energy
 
 
-## IRENA renewable electricity statistics
 
 This database presents statistics aggregated by country, technology, data type, grid connection, year. Data downloaded from: https://pxweb.irena.org/pxweb/en/IRENASTAT
 
@@ -276,7 +275,7 @@ ggsave(here::here("figures/2024-07-01_expert-panel-meeting/MRE_deployment_figure
 
 ```
 
-## 4 C Offshore?
+Add data from 4 C Offshore?
 
 
 # Increasing efficiency
@@ -575,7 +574,7 @@ ggsave(here::here("figures/2024-07-01_expert-panel-meeting/Efficiency_deployment
 
 # mCDR deployments 
 
-```{r Gattuso 2018 - ocean iron fertilisation experiments km2 - STILL NEED}
+```{r Gattuso 2018 - ocean iron fertilisation experiments km2}
 oif_df <- readxl::read_excel(here::here("data/raw-data/external/OIF_data.xlsx"))
 
 oif_df <- oif_df %>%
@@ -997,7 +996,7 @@ ggsave(here::here("figures/2024-07-01_expert-panel-meeting/mCDR_deployment_figur
 
 
 
-
+# Scoping results
 
 
 
