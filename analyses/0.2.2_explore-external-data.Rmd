@@ -996,8 +996,48 @@ ggsave(here::here("figures/2024-07-01_expert-panel-meeting/mCDR_deployment_figur
 
 
 
-# Scoping results
+# Policy links
 
+## write DOIs to text file for exploration in Overton
+
+```{r write DOIs to text file for exploration in Overton}
+## connect to database
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+
+# Collect all articles predicted to be relevant for Mitigation, and get their dois
+relevantdedups <- tbl(p1_db, "uniquerefs") %>%
+  select(analysis_id, doi) %>%
+  collect()
+
+pred_OROmitigation <- tbl(p1_db, "pred_oro_any_mitigation") %>%  # mitigation ORO
+  select(analysis_id, `oro_any.M_Renewables - mean_prediction`, `oro_any.M_Increase_efficiency - mean_prediction`,
+         `oro_any.M_CO2_removal_or_storage - mean_prediction`) %>%
+  collect()
+
+pred_OROmitigation <- reshape2::melt(pred_OROmitigation, id.vars = "analysis_id", variable.name = "ORO_type",
+                           value.name = "mean_prediction")
+
+pred_OROmitigation <- pred_OROmitigation %>%
+  filter(0.5 <= mean_prediction) %>%
+  left_join(relevantdedups, by = "analysis_id") %>%
+  filter(!is.na(doi))
+
+# remove any duplicates where a single paper is predicted relevant for multiple ORO types
+pred_OROmitigation <- pred_OROmitigation[!duplicated(pred_OROmitigation$analysis_id),]
+
+
+# Format dois consistently
+dois <- gsub("https://doi.org/", "", pred_OROmitigation$doi)
+length(dois) # 34704 DOIs in total
+
+# # Write to .txt. file
+# file_con <- file(here::here("outputs/predictedRelevantMitigationOroDois.txt"))
+# writeLines(dois, file_con)
+# close(file_con)
+```
 
 
 

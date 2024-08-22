@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Set up
+# Using twitteR
 
 ```{r}
 library(twitteR)
@@ -24,3 +24,38 @@ setup_twitter_oauth(consumer_key[1], consumer_key[2], access_token[1], access_to
 setup_twitter_oauth(consumer_key[1], consumer_key[2])
 
 ```
+
+
+
+# Using rAltmetric
+
+https://github.com/ropensci/rAltmetric 
+
+BUT need an altmetric API to but into the field apikey
+
+
+```{r}
+
+devtools::install_github("ropensci/rAltmetric")
+
+library(rAltmetric)
+library(magrittr)
+library(purrr)
+
+
+
+ids <- list(c(
+  "10.1038/nature09210",
+  "10.1126/science.1187820",
+  "10.1016/j.tree.2011.01.009",
+  "10.1086/664183"
+))
+
+# need to put my key in the function altmetrics, field apikey
+alm <- function(x)  altmetrics(doi = x) %>% altmetric_data()
+
+results <- pmap_df(ids, alm)
+# This results in a data.frame with one row per identifier.
+```
+
+
