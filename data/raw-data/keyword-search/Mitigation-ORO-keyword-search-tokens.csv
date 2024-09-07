@@ -1,0 +1,30 @@
+Group,Term,Term type
+CCS,carbon capture,expression
+CCS,CO2 capture,expression
+CCS,store,single
+CCS,sediment,single
+CCS,CCS,single
+CDR-BC,mangrove,single
+CDR-BC,salt marsh,expression
+CDR-BC,wetland,single
+CDR-BC,oyster reef,expression
+CDR-BC,macroalgae,single
+CDR-BC,microalgae,single
+CDR-BC,seaweed,single
+CDR-BC,kelp,single
+CDR-BC,phytoplankton,single
+CDR-BC,primary production,expression
+CDR-BC,iron fertilisation,expression
+CDR-BC,artificial upwelling,expression
+CDR-BC,biological carbon pump,expression
+CDR-BC,blue carbon,expression
+CDR-BC,sequester,single
+CDR-OAE,alkalinity enhancement,expression
+CDR-OAE,alkaline,single
+CDR-OAE,olivine,single
+CDR-OAE,silicate,single
+CDR-OAE,liming,single
+CDR-OAE,carbonate,single
+CDR-other,CDR,single
+CDR-other,carbon dioxide removal,expression
+CDR-other,CO2 removal,expression

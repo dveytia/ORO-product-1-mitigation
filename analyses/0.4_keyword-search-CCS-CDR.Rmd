@@ -1,0 +1,162 @@
+---
+title: "0.4_keyword-search-CCS-CDR"
+author: "Devi Veytia"
+date: "2024-09-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set up
+
+```{r load libraries}
+## Load libraries
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(RSQLite)
+library(ggplot2)
+library(tidyverse)
+
+```
+
+```{r set the seed}
+addTaskCallback(function(...) {set.seed(123);TRUE})
+```
+
+# Search mitigation articles for CDR keywords
+
+For scoping search used relevance threshold of >0.8, but there were a lot of MRE and efficiency articles, so maybe those are preferentially givien higher relevance. So use a lower threshold for CCS and CDR
+
+```{r}
+## connect to database
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+
+# Collect table of unique references metadata
+uniquerefs <- tbl(p1_db, "uniquerefs") %>%
+  select(analysis_id, title, abstract,keywords) %>%
+  collect()
+
+# identify references relevant to mitigation
+pred_OROmitigation <- tbl(p1_db, "pred_oro_any_mitigation") %>%  # mitigation 
+  select(analysis_id, `oro_any.M_Renewables - mean_prediction`, `oro_any.M_Increase_efficiency - mean_prediction`,
+         `oro_any.M_CO2_removal_or_storage - mean_prediction`) %>%
+  collect()
+
+# Filter to articles relevant for at least 1 mitigation ORO
+pred_OROmitigation <- pred_OROmitigation %>%
+  mutate(n_OROs = rowSums(.[2:4] > 0.5)) %>% 
+  filter(1 <= n_OROs) %>%
+  select(analysis_id) %>%
+  left_join(uniquerefs, by = "analysis_id")
+
+sum(is.na(pred_OROmitigation$abstract)) # no NA abstracts = 0
+
+
+# Create a text column to search for keywords
+pred_OROmitigation$text <- apply(pred_OROmitigation[,c("title","abstract","keywords")],
+                                  1, 
+                                  paste,
+                                  collapse = " ")
+
+pred_OROmitigation <- pred_OROmitigation %>%
+  select(-c(title, abstract, keywords))
+
+dbDisconnect(p1_db)
+```
+
+
+# Keyword search
+
+```{r source nlp functions}
+functionsToSource <- c("clean_string.R", "screen.R","tokenization.R","utils.R")
+for(i in 1:length(functionsToSource)){
+  source(here::here("R", functionsToSource[i]))
+}
+```
+
+```{r load terms to search and functions}
+## Process words to search
+nlp_search_terms <- read.csv(here::here(
+  "data/raw-data/keyword-search/Mitigation-ORO-keyword-search-tokens.csv"
+))
+
+colnames(nlp_search_terms) <- c("Group","Term","Term type")
+nlp_search_terms <- na.omit(nlp_search_terms,nlp_search_terms) # remove empty spaces
+nlp_search_terms$Term <- textstem::lemmatize_strings(nlp_search_terms$Term) # lemmitize
+nlp_search_terms$Term <- clean_string(nlp_search_terms$Term) # remove punctuation and extra spaces
+nlp_search_terms <- nlp_search_terms[!duplicated(nlp_search_terms$Term),] # remove any resulting duplicates
+nlp_search_terms$Term <- uk2us::convert_uk2us(nlp_search_terms$Term) # transform everything to American spelling
+
+# separate out into single terms and expressions
+single_words <- nlp_search_terms$Term[which(nlp_search_terms[,"Term type"] == "single")]
+expressions <- nlp_search_terms$Term[which(nlp_search_terms[,"Term type"] == "expression")]
+# name them by their corresponding group
+names(single_words) <- nlp_search_terms$Group[which(nlp_search_terms[,"Term type"] == "single")]
+names(expressions) <- nlp_search_terms$Group[which(nlp_search_terms[,"Term type"] == "expression")]
+
+
+```
+
+```{r screen text for keywords}
+results = parallel::mclapply(1:nrow(pred_OROmitigation), function(i){
+  
+  
+  ## Extract keywords
+  # process text
+  # group title, abstract together
+  text = pred_OROmitigation$text[i]
+  
+  # Lemmitization and clean string to remove extra spaces, numbers and punctuation
+  text <- clean_string(text)
+  text <- textstem::lemmatize_strings(text)
+  
+  # convert spelling to american
+  text <- uk2us::convert_uk2us(text)
+  
+  # screen for keywords
+  screens_swd <- screen(text, single_words)
+  screens_expr <- screen(text, expressions)
+  
+  # order dataset according to spreadsheet
+  screens_all <- cbind(screens_expr, screens_swd)
+  screens_all <- screens_all[,match(gsub(" ","_", nlp_search_terms$Term), colnames(screens_all))]
+  
+  #rownames(screens_all) <- my_text$analysis_id[i]
+  
+  # make sure everything is just a y/n response, to presence/absence
+  screens_all <- ifelse(1 <= screens_all, 1, 0)
+  
+  
+  ## Bind both together
+  screens_all <- cbind(data.frame(analysis_id = pred_OROmitigation$analysis_id[i]),screens_all) 
+  
+  # return the dataframe
+  return(screens_all)
+  
+}, mc.cores = 1)
+
+
+## Bind results together
+screens <- do.call(rbind.data.frame, results)
+
+## write
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+DBI::dbWriteTable(p1_db, "CCS_CDR_keywordMatches", screens, append=FALSE, overwrite = TRUE)
+DBI::dbDisconnect(p1_db)
+
+```
+
+
+
+
+
+
+
