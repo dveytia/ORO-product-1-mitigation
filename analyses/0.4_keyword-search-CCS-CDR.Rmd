@@ -93,6 +93,11 @@ nlp_search_terms$Term <- clean_string(nlp_search_terms$Term) # remove punctuatio
 nlp_search_terms <- nlp_search_terms[!duplicated(nlp_search_terms$Term),] # remove any resulting duplicates
 nlp_search_terms$Term <- uk2us::convert_uk2us(nlp_search_terms$Term) # transform everything to American spelling
 
+# CCS was changed to cc so correct
+nlp_search_terms$Term[nlp_search_terms$Term == "cc"] <- "ccs"
+nlp_search_terms$Term[nlp_search_terms$Term == "co capture"] <- "co2 capture"
+
+
 # separate out into single terms and expressions
 single_words <- nlp_search_terms$Term[which(nlp_search_terms[,"Term type"] == "single")]
 expressions <- nlp_search_terms$Term[which(nlp_search_terms[,"Term type"] == "expression")]
@@ -103,7 +108,10 @@ names(expressions) <- nlp_search_terms$Group[which(nlp_search_terms[,"Term type"
 
 ```
 
-```{r screen text for keywords}
+
+Screening step takes about 30 min
+
+```{r screen text for keywords, eval=FALSE}
 results = parallel::mclapply(1:nrow(pred_OROmitigation), function(i){
   
   
@@ -154,9 +162,61 @@ DBI::dbDisconnect(p1_db)
 
 ```
 
+```{r load in screens}
+
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+screens <- tbl(p1_db, "CCS_CDR_keywordMatches") %>%
+  collect()
+
+DBI::dbDisconnect(p1_db)
+
+```
+
+```{r tabulate matches}
+
+screen_tabs <- reshape2::melt(screens, id.vars = "analysis_id",
+                              variable.name = "Term")
+screen_tabs <- screen_tabs %>%
+  mutate(Term = gsub("_"," ", Term)) %>%
+  left_join(nlp_search_terms[,c("Group","Term")]) %>%
+  filter(Term != "cc")
+
+colnames(screen_tabs)
+
+screen_tabs_term <- screen_tabs %>%
+  group_by(Term) %>%
+  summarise(n=sum(value))
+
+screen_tabs_group <- screen_tabs %>%
+  group_by(Group) %>%
+  summarise(n=sum(value))
+
+# Typo where CCS became CC -- need to fix?
+screen_tabs_term 
+screen_tabs_group
 
 
+totalMatches <- screen_tabs %>%
+  filter(value==1) %>%
+  summarise(n_total = n_distinct(analysis_id))
 
+totalMatches 
+
+ 
+  
+```
+
+Visualize counts for each term, and also a venn diagram of overlap ids between different keywords? Also scope the papers that were matches for each to make sure they are relevant
+
+Another criteria for a non-random screen could be to filter to the upper 0.8 relevance threshold
+
+What is the relevance threshold for the articles that returned keyword matches?
+
+
+For reviewer training, use the old scoping project I set up, and assign particular titles to code (based on previous scoping ORO type allocations to get an even sample)
 
 
 
