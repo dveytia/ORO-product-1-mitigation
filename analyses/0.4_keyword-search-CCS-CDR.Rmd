@@ -178,35 +178,97 @@ DBI::dbDisconnect(p1_db)
 ```{r tabulate matches}
 
 screen_tabs <- reshape2::melt(screens, id.vars = "analysis_id",
-                              variable.name = "Term")
+                              variable.name = "Term", value.name = "Match")
 screen_tabs <- screen_tabs %>%
   mutate(Term = gsub("_"," ", Term)) %>%
-  left_join(nlp_search_terms[,c("Group","Term")]) %>%
-  filter(Term != "cc")
+  left_join(nlp_search_terms[,c("Group","Term")]) 
 
 colnames(screen_tabs)
 
 screen_tabs_term <- screen_tabs %>%
   group_by(Term) %>%
-  summarise(n=sum(value))
+  summarise(n=sum(Match))
+
+screen_tabs_term <- screen_tabs %>%
+  filter(Match==1) %>%
+  group_by(Group, Term) %>%
+  summarise(n_matches = n_distinct(analysis_id)) %>%
+  arrange(Group, desc(n_matches)) %>%
+  ungroup() %>%
+  mutate(order = as.factor(row_number()))
 
 screen_tabs_group <- screen_tabs %>%
   group_by(Group) %>%
-  summarise(n=sum(value))
+  summarise(n=sum(Match))
 
-# Typo where CCS became CC -- need to fix?
+# print summaries
 screen_tabs_term 
 screen_tabs_group
 
 
 totalMatches <- screen_tabs %>%
-  filter(value==1) %>%
+  filter(Match==1) %>%
   summarise(n_total = n_distinct(analysis_id))
 
 totalMatches 
 
  
   
+```
+
+```{r visualize counts of matches}
+# Simple barplot
+ggplot(screen_tabs_term, aes(x=order, y=n_matches, fill = Group)) +
+  geom_col()+
+  scale_x_discrete(labels = screen_tabs_term$Term)+
+  labs(y = "Number of matches", x = "keyword", fill = "Intervention\ntype")+
+  theme_bw()+
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+  
+# Upset plot within each group 
+require(ggupset)
+
+termGroups <- unique(screen_tabs_term$Group)
+upsetGGPs <- vector("list", length(termGroups))
+names(upsetGGPs) <- termGroups
+
+
+for(i in 1:length(termGroups)){
+  
+  tempDat <- screen_tabs %>%
+    filter(Group == termGroups[i], Match==1) %>%
+    distinct(analysis_id, .keep_all = TRUE) 
+    # unnest(cols = Term) %>%
+    # mutate(TermMember =1) %>%
+    # pivot_wider(names_from = Terms, values_from = TermMember, values_fill = list(TermMember = 0)) %>%
+    # as.data.frame()
+  
+  summary(tempDat)
+  
+
+  
+  upsetGGPs[[i]] <- ggplot(tempDat, aes(x=Term))+
+    geom_bar()+
+    scale_x_upset(n_intersections = 20)
+  upsetGGPs[[i]]
+}
+
+library(tidyverse)
+library(ggupset)
+
+main_plot <- tidy_movies %>%
+  distinct(title, year, length, .keep_all=TRUE) %>% head()
+  ggplot(aes(x=Genres)) +
+  geom_bar() +
+  scale_x_upset(n_intersections = 20)
+  
+main_plot
+
+
+library(ComplexUpset)
+
 ```
 
 Visualize counts for each term, and also a venn diagram of overlap ids between different keywords? Also scope the papers that were matches for each to make sure they are relevant
