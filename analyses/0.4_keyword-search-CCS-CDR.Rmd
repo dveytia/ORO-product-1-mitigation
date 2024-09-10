@@ -80,7 +80,7 @@ for(i in 1:length(functionsToSource)){
 }
 ```
 
-```{r load terms to search and functions}
+```{r load terms to search}
 ## Process words to search
 nlp_search_terms <- read.csv(here::here(
   "data/raw-data/keyword-search/Mitigation-ORO-keyword-search-tokens.csv"
@@ -162,6 +162,14 @@ DBI::dbDisconnect(p1_db)
 
 ```
 
+
+# Visualize keyword matches
+
+```{r load packages}
+library(ggplot2)
+library(ComplexUpset)
+```
+
 ```{r load in screens}
 
 p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
@@ -227,47 +235,67 @@ ggplot(screen_tabs_term, aes(x=order, y=n_matches, fill = Group)) +
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
   
-# Upset plot within each group 
-require(ggupset)
+# Upset plot  or venn diagram within each group 
+require(ComplexUpset)
+library(ggVennDiagram)
 
-termGroups <- unique(screen_tabs_term$Group)
+termGroups <- unique(nlp_search_terms$Group)
 upsetGGPs <- vector("list", length(termGroups))
 names(upsetGGPs) <- termGroups
+colnames(screens)[-1] <- nlp_search_terms$Term
 
+plotType <- "Venn"
 
 for(i in 1:length(termGroups)){
   
-  tempDat <- screen_tabs %>%
-    filter(Group == termGroups[i], Match==1) %>%
-    distinct(analysis_id, .keep_all = TRUE) 
-    # unnest(cols = Term) %>%
-    # mutate(TermMember =1) %>%
-    # pivot_wider(names_from = Terms, values_from = TermMember, values_fill = list(TermMember = 0)) %>%
-    # as.data.frame()
+  tempDat <- screens[,c(1,which(colnames(screens) %in% 
+                                    nlp_search_terms$Term[nlp_search_terms$Group == termGroups[i]]))]
   
-  summary(tempDat)
+  if(ncol(tempDat) > 6){plotType <- "Upset"}else{plotType <- "Venn"}
   
-
+  if(plotType == "Upset"){
+    if(ncol(tempDat) > 10){minSize <- 20}else{minSize <- 1}
+    upsetGGPs[[i]] <- upset(tempDat, 
+          colnames(tempDat)[-1],
+          sort_sets = FALSE,
+          sort_intersections = 'descending',
+          sort_intersections_by = c("degree","cardinality"),
+          group_by = "degree",
+          min_degree = 2,
+          max_degree = 2,
+          min_size = minSize,
+          set_sizes = (upset_set_size(geom = geom_bar())+
+                 geom_text(aes(label=..count..), hjust=0, stat='count', size=2.5, col="black")+
+                 #expand_limits(y=30000)+
+                 theme(axis.text.x = element_text(angle=90)))
+          )
+  }
   
-  upsetGGPs[[i]] <- ggplot(tempDat, aes(x=Term))+
-    geom_bar()+
-    scale_x_upset(n_intersections = 20)
-  upsetGGPs[[i]]
+  if(plotType == "Venn"){
+    vennList <- vector("list", length = ncol(tempDat)-1)
+    names(vennList) <- colnames(tempDat)[-1]
+    for(s in 1:length(vennList)){
+      vennList[[s]] <- tempDat$analysis_id[tempDat[,s+1] == 1]
+    }
+    vennList <- Filter(function(x) length(x) > 0, vennList)
+  
+    upsetGGPs[[i]] <- ggVennDiagram(vennList, label_alpha = 0)+
+      ggplot2::scale_fill_distiller("blues", direction = 1)+
+      labs(fill="count")
+    
+  }
+  
+  
 }
 
-library(tidyverse)
-library(ggupset)
 
-main_plot <- tidy_movies %>%
-  distinct(title, year, length, .keep_all=TRUE) %>% head()
-  ggplot(aes(x=Genres)) +
-  geom_bar() +
-  scale_x_upset(n_intersections = 20)
-  
-main_plot
+require(cowplot)
+keywordInteractionsPlots <- plot_grid(plotlist =upsetGGPs, ncol = 1, labels = termGroups,
+                                      rel_heights = c(1,1.5,1,1))
+save_plot(here::here("figures/supplemental/keywordInteractionsPlots.png"), keywordInteractionsPlots,
+          base_height = 15, base_width = 10)
 
 
-library(ComplexUpset)
 
 ```
 
