@@ -1,0 +1,96 @@
+---
+title: "0.5_reviewer_training_agreement"
+author: "Devi Veytia"
+date: "2024-09-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Round 1
+
+```{r}
+
+## Read in all the user answer sets
+rev_train_dir <- dir(here::here("data/raw-data/Reviewer_training/"))
+user_answers <- rev_train_dir[grep("answers", rev_train_dir)]
+sets <- stringr::str_extract(string = user_answers, pattern = "_[0-9]+")
+setNo <- as.numeric(stringr::str_extract(sets, "\\d+"))
+
+# loop through all the sets and calculate kappa
+
+for(i in 1:length(sets)){
+  tempSet <- readxl::read_xlsx(here::here("data/raw-data/Reviewer_training/",user_answers[i]), sheet = "User Answers")
+  
+  # Identify labels coded to test
+  valVars <- colnames(tempSet)[!(colnames(tempSet) %in% c("Article ID",
+                                                          "Article URL",
+                                                          "User Name",
+                                                          "Resolve?",
+                                                          "ORO type",
+                                                          "Ecosystem type",
+                                                          "User Note",
+                                                          "Title",
+                                                          "Journal",
+                                                          "Authors",
+                                                          "Filenames"))]
+  # reformat into logical vectors
+  tempSet$Design <- ifelse(tempSet$`Development stage` == "Design", "true","false")
+  valVars <- valVars[valVars != "Development stage"]
+  valVars <- c(valVars, "Design")
+  # tempSet$Design <- tempSet$`Development stage` == "Design"
+  # valVars <- valVars[valVars != "Development stage"]
+  # valVars <- c(valVars, "Design")
+  # tempSet[,valVars] <- apply(tempSet[,valVars], 2, function(x) x == "true")
+  # tempSet[,valVars] <- apply(tempSet[,valVars], 2, function(x) ifelse(is.na(x), FALSE, TRUE))
+  
+  
+  # plot
+  ggpTemp <- ggplot2::ggplot(data = tempSet, ggplot2::aes(x=`User Name`, y = substr(Title, 1, 50), fill = `Include`))+
+    ggplot2::geom_tile()+
+    ggplot2::theme_bw()+
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust=1))
+  ggpTemp
+
+  
+  # Empty dataframe to fill
+  kappaStatsTemp <- matrix(nrow = length(valVars), ncol=7,
+                     dimnames = list(rep(sets[i], length(valVars)), 
+                                     c("Set","Label","Fleiss_kappa","p.value","N_raters","N_articles","Prop_True")))
+
+  
+  for(v in 1:length(valVars)){
+    tempSetVar <- reshape2::dcast(data=tempSet, formula = `Article ID` ~ `User Name`, value.var = valVars[v])
+    tempSetVar <- apply(tempSetVar, 1:2, function(x) ifelse(is.na(x), "false", x))
+    tempKappa <- irr::kappam.fleiss(tempSetVar[,-c(1)])
+    
+    kappaStatsTemp[v,"Set"] <- paste(i)
+    kappaStatsTemp[v,"Label"] <- valVars[v]
+    kappaStatsTemp[v,"Fleiss_kappa"] <- signif(tempKappa$value, digits = 3)
+    kappaStatsTemp[v,"p.value"] <- signif(tempKappa$p.value, digits=3)
+    kappaStatsTemp[v,"N_raters"] <- tempKappa$raters
+    kappaStatsTemp[v,"N_articles"] <- tempKappa$subjects
+    kappaStatsTemp[v,"Prop_True"] <- sum(c(tempSetVar[,-c(1)]) == "true")/length(c(tempSetVar[,-c(1)]))
+  }
+  
+  if(i==1){
+    kappaStats <- kappaStatsTemp
+  }else{
+    kappaStats <- rbind(kappaStats, kappaStatsTemp)
+  }
+  
+}
+
+
+print(kappaStats)
+write.csv(kappaStats, here::here("outputs/reviewer-train-kappa-statistics.csv"))
+```
+
+```{visualize article agreement}
+
+
+
+```
+
