@@ -1,0 +1,29 @@
+Group,Term
+CCS,carbon AND capture
+CCS,CO2 AND capture
+CCS,stor* AND sediment
+CDR-BC,mangrove
+CDR-BC,salt marsh
+CDR-BC,tidal marsh
+CDR-BC,seagrass
+CDR-BC,carbon AND sequest*
+CDR-BC,blue carbon
+CDR-Cult,macroalgae
+CDR-Cult,microalgae
+CDR-Cult,seaweed
+CDR-Cult,kelp
+CDR-Biopump,phytoplankton
+CDR-Biopump,primary production
+CDR-Biopump,iron fertilisation
+CDR-Biopump,artificial upwelling
+CDR-Biopump,biological carbon pump
+CDR-OAE,alkalin* AND enhanc*
+CDR-OAE,olivine
+CDR-OAE,silicate
+CDR-OAE,liming
+CDR-OAE,carbonate
+CDR-Other,CDR
+CDR-Other,carbon dioxide removal
+CDR-Other,CO2 remov*
+CDR-Other,electrochem* AND carbon
+MRE-Bio,bioethanol 
