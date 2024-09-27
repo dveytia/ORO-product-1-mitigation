@@ -64,13 +64,13 @@ for(i in 1:length(functionsToSource)){
 
 ## Search queries 
 queries <- list(
-  CCS = '(carbon AND capture) OR (CO2 AND capture) OR (stor* AND sediment)',
+  CCS = '(carbon AND capture) OR (CO2 AND capture)', #OR (stor* AND sediment)
   CDR_BC = 'mangrove OR "salt marsh" OR "tidal marsh" OR seagrass OR (carbon AND sequest*) OR "blue carbon"',
-  CDR_Cult = 'macroalg* OR microalg* OR seaweed OR kelp',
+  CDR_Cult = '(macroalg* OR microalg* OR seaweed OR kelp) AND (sequest* OR capture OR remov* OR stor* OR sink*)',
   CDR_BioPump = '"iron fertilization" OR "artificial upwell*" OR "biological carbon pump"',
-  CDR_OAE = 'alkal* AND enhanc*',
+  CDR_OAE = '(alkal* AND enhanc*) OR alkalinization OR weathering OR liming OR olivine',
   CDR_Other = '"carbon dioxide remov*" OR "CO2 remov*" OR (electrochem* AND carbon)',
-  MRE_Bio = 'bioethanol AND (marine OR ocean OR kelp OR seaweed OR macroalgae OR phytoplankton OR microalgae)'
+  MRE_Bio = '(bioethanol OR biodiesel OR biofuel OR Biogas OR (bio* AND (fuel OR oil))) AND (marine OR ocean OR kelp OR seaweed OR macroalgae OR phytoplankton OR microalgae)'
 )
 
 
@@ -92,8 +92,7 @@ clean_string2 <- function(x) {
 
 ## LOOP THROUGH DOCMENTS AND QUERIES AND CONDUCT SEARCH -----------------
 results = parallel::mclapply(1:nrow(pred_OROmitigation), function(i){
-  
-  print(paste(i, "document/", nrow(pred_OROmitigation)))
+  if(i%%1000 ==0){print(paste("document",i))}
   # process text
   # group title, abstract together
   text = pred_OROmitigation$text[i]

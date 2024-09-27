@@ -1,0 +1,364 @@
+---
+title: "0.6_sample-articles-screen-and-code"
+author: "Devi Veytia"
+date: "2024-09-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this document articles will be sampled by ORO type, and also from keyword searches for less-sampled types: CCS, CDR, and MRE-Bio
+
+# Set up
+
+```{r set up libraries}
+## Load libraries
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(RSQLite)
+library(ggplot2)
+library(tidyverse)
+
+source(here::here("R/bool_detect.R"))
+source(here::here("R/write_ris_batches.R"))
+```
+
+```{r set the seed}
+addTaskCallback(function(...) {set.seed(123);TRUE})
+```
+
+Inclusion targets:
+MRE-Ocean - 150
+MRE-Located -150
+MRE-Bio - 150
+Efficiency -150
+CCS - 150
+CDR-BC (salt marsh) - 150
+CDR-BC (mangrove) - 150
+CDR-BC (seagrass) - 150
+CDR-BC (other) - no target
+CDR-OAE - 150
+CDR-BioPump - 150
+CDR-Cult - 150
+CDR-Other - no target
+
+TOTAL INCLUSION TARGET = 1650 
+From scoping search, assume 30% will be exclusion. To allow for wiggle room, let's say 50%. so in total need to sample 1650*1.5 = 2475. Round to 2500
+
+
+Split these into projects on the topics: random, MRE, Efficiency, CDR_BC, CDR_OAE, CDR_BioPump, CDR_Cult, CCS
+
+```{r Set up inputs to determine how many articles to sample}
+setSize <- 200 # write the files in batches to not overwhelm sysrev
+#nRecsTotal = 800 # Max no of articles to sample in total per label
+nRecsTotal = 2500 # total target number of records to screen
+propRand = 0.3 # proportion of target samples that needs to be random
+inflateFactor = 1.5 # how much to inflate an estimate to allow for an envelope of error
+```
+
+```{r collect all potential mitigation ORO references}
+## connect to database
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                            here::here("data","sqlite-databases","product1.sqlite"),
+                            create=FALSE)
+
+
+# Collect table of unique references metadata
+uniquerefs <- tbl(p1_db, "uniquerefs") %>%
+  select(analysis_id, title, abstract,keywords) %>%
+  collect()
+
+# identify references relevant to mitigation
+pred_OROmitigation <- tbl(p1_db, "pred_oro_any_mitigation") %>%  # mitigation 
+  select(analysis_id, `oro_any.M_Renewables - mean_prediction`, `oro_any.M_Increase_efficiency - mean_prediction`,
+         `oro_any.M_CO2_removal_or_storage - mean_prediction`) %>%
+  collect()
+
+# Filter to articles relevant for at least 1 mitigation ORO
+pred_OROmitigation <- pred_OROmitigation %>%
+  mutate(n_OROs = rowSums(.[2:4] > 0.5)) %>% 
+  filter(1 <= n_OROs) %>%
+  left_join(uniquerefs, by = "analysis_id")
+
+# Disconnect from database
+dbDisconnect(p1_db)
+
+
+# For simplicity, remove articles where multiple OROs are predicted relevant
+pred_OROmitigation_1ORO <- pred_OROmitigation %>%
+  #mutate(n_OROs = rowSums(.[2:4] > 0.5)) %>% 
+  filter(n_OROs == 1) %>%
+  select(-c(n_OROs))
+
+pred_OROmitigation_1ORO_melt <- reshape2::melt(pred_OROmitigation_1ORO, 
+                                          id.vars = c("analysis_id", "title","abstract","keywords"), 
+                                          variable.name = "ORO_type",
+                                          value.name = "mean_prediction")
+
+```
+
+
+# Draw random samples for model validation 
+
+```{r Draw random samples for validation}
+randids <- sample(pred_OROmitigation_1ORO$analysis_id, round(nRecsTotal*propRand))
+
+df <- pred_OROmitigation_1ORO %>%
+  filter(analysis_id %in% randids) 
+
+## WRITE TO FILES
+write_ris_batches(df = df %>% select(title, abstract, keywords), 
+                  batchSize = setSize, 
+                  writeDir = here::here("data/derived-data/0.6_sample-articles-screen-and-code"), 
+                  fileNamePrefix = "random-sample_set_")
+
+sampled_articles <- df %>% select(analysis_id, title, abstract, keywords) %>% mutate(sample_method = "random")
+```
+
+
+# Non-random samples for training
+
+## Using keyword queries: CCS, CDR and MRE-Bio using keywords
+
+```{r load in keyword search results v2}
+
+## Load and format data
+
+# Load in keyword matches
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                            here::here("data","sqlite-databases","product1.sqlite"),
+                            create=FALSE)
+keywordSearch <- tbl(p1_db, "CCS_CDR_keywordMatches_v2") %>% collect()
+DBI::dbDisconnect(p1_db)
+
+# Filter to only matches and join with metadata
+keywordSearch <- keywordSearch %>%
+  filter(query_match ==1) %>%
+  left_join(uniquerefs, by = "analysis_id")
+
+# check overlap with random samples and remove
+sum(randids %in% unique(keywordSearch$analysis_id)) # [1] 122
+keywordSearch <- subset(keywordSearch, !(analysis_id %in% randids))
+
+
+
+## Explore match results
+
+# Tabluate numbers of matches per type
+keywordSearch %>%
+  group_by(ORO_type) %>% 
+  summarise(n = n()) %>%
+  arrange(desc(n))
+#   ORO_type        n
+#   <chr>       <int>
+# 1 CDR_BC       4314
+# 2 CCS          2203
+# 3 MRE_Bio      1685
+# 4 CDR_Cult      562
+# 5 CDR_Other     433
+# 6 CDR_OAE       264
+# 7 CDR_BioPump   241
+
+# What about overlaps? Prioritize less sampled type when there is an overlap
+types <- unique(keywordSearch$ORO_type)
+vennList <- vector("list", length = length(types))
+names(vennList) <- types
+for(s in 1:length(vennList)){
+  vennList[[s]] <- keywordSearch$analysis_id[
+    which(keywordSearch$ORO_type == types[s] & keywordSearch$query_match == 1)]
+}
+vennList <- Filter(function(x) length(x) > 0, vennList)
+keywordVenn <- ggVennDiagram::ggVennDiagram(vennList, label_alpha = 0, force_upset = TRUE)
+keywordVenn
+
+# # Scope how relevant the matches are
+# keywordSearch %>%
+#   group_by(ORO_type) %>%
+#   slice_sample(n = 50) %>% 
+#   select(ORO_type, title) %>%
+#   View
+
+
+
+
+## Remove overlaps bewteen sets 
+# establish order of priority -- the last type in the vector will be prioritized over the preceeding one
+orderedTypes <- names(table(keywordSearch$ORO_type)[order(table(keywordSearch$ORO_type),decreasing = TRUE)])
+orderedTypes[1:2] <- c("CDR_CCS", "CDR_BC")# except switch BC and CCS in order of importance
+orderedTypes <- orderedTypes[orderedTypes != "CDR_Other"] # remove CDR_Other as a priority
+orderedTypes
+
+# Function to use order of priority to de-duplicate
+removeOverlap_fn <- function(df, idColname, setColname, orderedSets, defaultSet){
+  dupIDs <- duplicated(df[,idColname])
+  dupIDs <- unlist(c(unique(df[dupIDs,idColname])))
+  
+  nonDupDf <- df[!(unlist(c(df[,idColname])) %in% dupIDs),]
+  
+  for(i in 1:length(dupIDs)){
+    tempDf <- df[which(df[,idColname]== dupIDs[i]),] # which rows are duplicates of that ID
+    x <- unlist(c(tempDf[,setColname]))
+    setChoice <- NA
+    for(s in 1:length(orderedSets)){
+      setChoice <- ifelse(orderedSets[s] %in% x, orderedSets[s],setChoice)
+    }
+    if(is.na(setChoice)){setChoice <- paste(defaultSet)}
+    if(i==1){
+      return_df <- tempDf[which(x == setChoice),]
+    }else{
+      return_df <- rbind(return_df,
+                         tempDf[which(x == setChoice),])
+    }
+  }
+  if(0 < nrow(nonDupDf)){return_df <- rbind(return_df, nonDupDf)}
+  return(return_df)
+}
+
+# Use function to remove duplicates
+keywordSearch <- removeOverlap_fn(df = keywordSearch,
+                                            idColname = "analysis_id",
+                                            setColname = "ORO_type",
+                                            orderedSets = orderedTypes,
+                                            defaultSet = "CDR_Other")
+
+# Tabluate numbers of matches per type now that overlaps are removed
+keywordSearch %>%
+  group_by(ORO_type) %>% 
+  summarise(n = n()) %>%
+  arrange(desc(n))
+#   ORO_type        n
+#   <chr>       <int>
+# 1 CDR_BC       2859
+# 2 MRE_Bio      1152
+# 3 CCS          1105
+# 4 CDR_Other     430
+# 5 CDR_Cult      123
+# 6 CDR_BioPump   109
+# 7 CDR_OAE        99
+
+
+## Stratify CDR_BC sampling based on important ecosystem types
+# groups: mangrove OR "salt marsh" OR "tidal marsh" OR seagrass and then general
+# Refine queries with large numbers of search results by adding more specific keywords
+CDR_BC_Mangrove <- keywordSearch %>%
+  filter(ORO_type == "CDR_BC") %>% 
+  mutate(text = paste(title, abstract, sep = " ")) %>% 
+  filter(grepl(pattern = "mangrov*", x = text, ignore.case = TRUE)) %>%
+  mutate(ORO_type = "CDR_BC_Mangrove")
+ind <- bool_detect2(CDR_BC_Mangrove$text, '(carbon AND sequest*) OR "blue carbon"')
+CDR_BC_Mangrove <- CDR_BC_Mangrove[ind,]
+
+CDR_BC_marsh <- keywordSearch %>%
+  filter(ORO_type == "CDR_BC") %>% 
+  mutate(text = paste(title, abstract, sep = " ")) %>% 
+  filter(grepl(pattern = "marsh", x = text, ignore.case = TRUE)) %>%
+  mutate(ORO_type = "CDR_BC_salt marsh")
+
+CDR_BC_seagrass <- keywordSearch %>%
+  filter(ORO_type == "CDR_BC") %>% 
+  mutate(text = paste(title, abstract, sep = " ")) %>% 
+  filter(grepl(pattern = "seagrass", x = text, ignore.case = TRUE)) %>%
+  mutate(ORO_type = "CDR_BC_seagrass")
+
+
+# remove CDR eocystem linked papers to get CDR_BC general
+CDR_BC_gen <- keywordSearch %>%
+  filter(ORO_type == "CDR_BC")
+CDR_BC_gen <- CDR_BC_gen[!(CDR_BC_gen$analysis_id 
+                         %in% c(CDR_BC_Mangrove$analysis_id, 
+                                CDR_BC_marsh$analysis_id, 
+                                CDR_BC_seagrass$analysis_id)),]
+CDR_BC_gen$ORO_type <- "CDR_BC_general"
+
+# Re-join stratified blue carbon
+CDR_BC_Strat <- rbind(CDR_BC_Mangrove %>% select(-c(text)), 
+                      CDR_BC_marsh%>% select(-c(text)), 
+                      CDR_BC_seagrass%>% select(-c(text)), 
+                      CDR_BC_gen)
+table(CDR_BC_Strat$ORO_type)
+# CDR_BC_general   CDR_BC_Mangrove CDR_BC_salt marsh   CDR_BC_seagrass 
+#           1613               520               503               463 
+
+
+
+## Sub-sample when a set is too big and write to file
+
+# Bind all the stratified dataframes into new dataframe
+keywordSearch_BCStrat <- rbind(
+  keywordSearch[keywordSearch$ORO_type != "CDR_BC",],
+  CDR_BC_Strat
+)
+
+# Lookup table of number of target articles to sample for each stratified type
+CDR_sampleTargets <- data.frame(
+  ORO_type = c("CCS","CDR_BC_salt marsh","CDR_BC_Mangrove","CDR_BC_seagrass","CDR_BC_general","CDR_OAE","CDR_BioPump","CDR_Cult","CDR_Other","MRE_Bio")
+)
+CDR_sampleTargets$sampleN = rep(round(250*inflateFactor), nrow(CDR_sampleTargets))
+OROTypesBCStrat <- CDR_sampleTargets$ORO_type
+
+# Loop through and write to .ris files
+for(t in 1:length(OROTypesBCStrat)){
+  tempDf <- keywordSearch_BCStrat %>%
+    filter(ORO_type == OROTypesBCStrat[t])
+  # If the number of records > target sample size, sub-sample
+  if(CDR_sampleTargets$sampleN[CDR_sampleTargets$ORO_type == OROTypesBCStrat[t]] < nrow(tempDf)){
+    tempDf <- tempDf[sample(1:nrow(tempDf), 
+                            CDR_sampleTargets$sampleN[CDR_sampleTargets$ORO_type == OROTypesBCStrat[t]]),]
+  }
+  write_ris_batches(df = tempDf %>% select(title, abstract, keywords), 
+                  batchSize = setSize, 
+                  writeDir = here::here("data/derived-data/0.6_sample-articles-screen-and-code"), 
+                  fileNamePrefix = paste0("keyword-sample_",OROTypesBCStrat[t],"_set_")) 
+  sampled_articles <- rbind(sampled_articles, tempDf %>% select(analysis_id, title, abstract, keywords) %>% mutate(sample_method = "keyword search"))
+}
+
+```
+
+
+
+
+# Non-random sample using high relevance: MRE and Increasing efficiency
+
+```{r non-random sampling for renewables and increase efficiency just take high relevance predictions}
+
+## Sub-sample when a set is too big and write to file
+
+# Lookup table of number of target articles to sample for each stratified type
+MRE_Eff_sampleTargets <- data.frame(
+  ORO_type = c("Renewables","Efficiency")
+)
+MRE_Eff_sampleTargets$sampleN = c(round(500*inflateFactor), round(250*inflateFactor))
+OROTypesMRE_Eff <- MRE_Eff_sampleTargets$ORO_type
+
+# Loop through and write to .ris files
+for(t in 1:length(OROTypesMRE_Eff)){
+  tempDf <- pred_OROmitigation_1ORO_melt %>%
+    filter(!(analysis_id %in% randids) & 0.8 <= mean_prediction) %>%
+    filter(grepl(OROTypesMRE_Eff[t], ORO_type, ignore.case=TRUE))
+  # If the number of records > target sample size, sub-sample
+  if(MRE_Eff_sampleTargets$sampleN[MRE_Eff_sampleTargets$ORO_type == OROTypesMRE_Eff[t]] < nrow(tempDf)){
+    tempDf <- tempDf[sample(1:nrow(tempDf), 
+                            MRE_Eff_sampleTargets$sampleN[MRE_Eff_sampleTargets$ORO_type == OROTypesMRE_Eff[t]]),]
+  }
+  write_ris_batches(df = tempDf %>% select(title, abstract, keywords), 
+                  batchSize = setSize, 
+                  writeDir = here::here("data/derived-data/0.6_sample-articles-screen-and-code"), 
+                  fileNamePrefix = paste0("rel-greater-0.8-sample_",OROTypesMRE_Eff[t],"_set_")) 
+  sampled_articles <- rbind(sampled_articles, tempDf %>% select(analysis_id, title, abstract, keywords) %>% mutate(sample_method = "0.8 <= relevance"))
+}
+
+```
+
+
+# Write all the sampled articles to a table in database for analysis_id lookup
+```{r write sampled articles into sqlite database}
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                            here::here("data","sqlite-databases","product1.sqlite"),
+                            create=FALSE)
+dbWriteTable(p1_db, "0.6_sampled-articles", sampled_articles, overwrite = FALSE, append = FALSE)
+dbDisconnect(p1_db)
+```
+
