@@ -231,13 +231,13 @@ keywordSearch %>%
   arrange(desc(n))
 #   ORO_type        n
 #   <chr>       <int>
-# 1 CDR_BC       2859
-# 2 MRE_Bio      1152
+# 1 CDR_BC       3622
+# 2 MRE_Bio      1442
 # 3 CCS          1105
-# 4 CDR_Other     430
-# 5 CDR_Cult      123
-# 6 CDR_BioPump   109
-# 7 CDR_OAE        99
+# 4 CDR_Cult      548
+# 5 CDR_Other     258
+# 6 CDR_OAE       252
+# 7 CDR_BioPump   241
 
 
 ## Stratify CDR_BC sampling based on important ecosystem types
@@ -279,8 +279,8 @@ CDR_BC_Strat <- rbind(CDR_BC_Mangrove %>% select(-c(text)),
                       CDR_BC_seagrass%>% select(-c(text)), 
                       CDR_BC_gen)
 table(CDR_BC_Strat$ORO_type)
-# CDR_BC_general   CDR_BC_Mangrove CDR_BC_salt marsh   CDR_BC_seagrass 
-#           1613               520               503               463 
+   # CDR_BC_general   CDR_BC_Mangrove CDR_BC_salt marsh   CDR_BC_seagrass 
+   #           2267               578               552               514 
 
 
 
@@ -360,5 +360,7 @@ p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
                             create=FALSE)
 dbWriteTable(p1_db, "0.6_sampled-articles", sampled_articles, overwrite = FALSE, append = FALSE)
 dbDisconnect(p1_db)
+
+
 ```
 
