@@ -1040,5 +1040,98 @@ length(dois) # 34704 DOIs in total
 ```
 
 
+## Explore FAOLEX database
+
+Downloaded data by selecting 'sea' domain, and then keywords: 'climate change' or 'renewable energy'
+Note the pdf with the same name has links to the original document
+```{r}
+fdf <- readxl::read_excel(here::here("data/raw-data/external/FAOLEX_sea_climate-change_renewable-energy.xlsx"))
+colnames(fdf)[1] <- "faolexID"
+
+fdf <- fdf %>%
+  filter(!(`Primary Subject` %in% c("Land and soil",
+                                  "Land and soil; Wild species and ecosystems",
+                                  "Environment; Land and soil",
+                                  "Land and soil; National development",
+                                  "Forestry; Wild species and ecosystems",
+                                  "Environment; Forestry; Water; Wild species and ecosystems; Climate change",
+                                  "Agricultural and rural development",
+                                  "Agricultural and rural development; Wild species and ecosystems",
+                                  "Agricultural and rural development; Environment; National development",
+                                 "Gender; Climate change",
+                                 "Gender",
+                                 "Agricultural and rural development; Private sector / entrepreneurship")))
+
+
+## Plot on map
+fdf$iso_code = countrycode::countrycode(fdf$Jurisdiction, "country.name", "iso3c")
+
+
+library(sf)        
+library(rnaturalearth)
+
+world_sf <- ne_countries(returnclass = "sf") %>%
+  mutate(log_pop = log(pop_est))
+
+# Robinson projection
+crs_robin <- "+proj=robin +lat_0=0 +lon_0=0 +x0=0 +y0=0"
+
+# join'
+join1 <- merge.data.frame(world_sf, fdf %>% group_by(Jurisdiction) %>% summarise(n_docs = n()), by.x = "name_long", by.y = "Jurisdiction", all.x = TRUE, all.y = FALSE)
+join2 <- merge.data.frame(join1 %>% filter(is.na(n_docs)) %>% dplyr::select(-c(n_docs)), 
+                          fdf %>% group_by(Jurisdiction) %>% summarise(n_docs = n()), by.x = "name_en", by.y = "Jurisdiction", all.x = TRUE, all.y = FALSE)
+
+world_join <- rbind(
+  join1 %>% filter(!is.na(n_docs)),
+  join2
+) %>%
+  st_as_sf(sf_column_name = "geometry")
+  
+
+# base plot
+policyMap <- ggplot() + 
+  geom_sf(data = world_sf, fill="transparent", size = 0.2) +
+  geom_sf(data = world_join, aes(fill = n_docs), size = 0.2) +
+  scale_fill_viridis_c()+ 
+  theme_minimal() +
+  coord_sf(crs = crs_robin)+
+  labs(title = "Number FAOLEX documents",
+       fill = "N Docs",
+       caption = paste("Documents retrieved by search for 'climate change' and 'renewable energy' in the 'sea' domain. \n Documents can be polcies, legislation, regulation, international agreement, constitution\n Documents spatially matched =", sum(world_join$n_docs, na.rm=TRUE), "/", nrow(fdf)))
+
+policyMap
+
+
+## Timeseries
+require(tidyr)
+fdf_area <- fdf %>%
+  mutate(Date = as.Date(as.numeric(`Date of text`), origin = as.Date("1900-01-01")),
+         year = format.Date(Date, "%Y")) %>%
+  filter(as.Date("2000-01-01") <= Date) %>%
+  dplyr::select(`Type of text`, year) %>%
+  na.omit %>%
+  group_by(`Type of text`, year) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  tidyr::complete(`Type of text`, year, fill = list(n=0)) %>%
+  arrange(`Type of text`, year) %>%
+  group_by(`Type of text`) %>%
+  mutate(cumCount = cumsum(n)) 
+
+ggplot(fdf_area, aes(x=as.Date(paste0(year, "-01-01")), y = cumCount, fill = `Type of text`)) + 
+  geom_area()+
+  scale_x_date(limits = c(as.Date("2000-01-01"), as.Date("2024-12-31")))+
+  scale_fill_discrete()+
+  labs(x="Date",y = "Cumulative document count")+
+  theme_bw()+
+  theme(
+    legend.position = "bottom"
+  )
+
+```
+
+
+
+
 
 
