@@ -5,6 +5,7 @@
 data/sqlite-databases/product1.sqlite
 data/raw-data/external/world_shp/
 data/data_map.RData
+data/derived-data/screen-article-answers-formatted/
 
 # key information
 /keys/

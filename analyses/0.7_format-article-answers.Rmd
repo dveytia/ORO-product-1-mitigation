@@ -1,0 +1,159 @@
+---
+title: "0.7_format-article-answers"
+author: "Devi Veytia"
+date: "2025-03-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set up
+
+```{r set up libraries}
+## Load libraries
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(RSQLite)
+library(ggplot2)
+library(tidyverse)
+
+source(here::here("R/bool_detect.R"))
+source(here::here("R/write_ris_batches.R"))
+```
+
+```{r set the seed}
+addTaskCallback(function(...) {set.seed(123);TRUE})
+```
+
+
+# 2025-03-17 Test run on MRE answers
+
+```{r load article answers}
+
+# Load in metadata
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+sampleDf <- tbl(p1_db, "0.6_sampled-articles") %>%
+  collect()
+
+dbDisconnect(p1_db)
+
+# Load article answers
+dirUse <- here::here("data/raw-data/screen-article-answers")
+fileNames <- dir(dirUse)
+fileNames <- fileNames[grep("2025-03-17", fileNames)]
+
+ansDf <- data.frame()
+for(f in fileNames){
+  tmp <- readxl::read_excel(file.path(dirUse, f), sheet = "Article Answers")
+  ansDf <- rbind(ansDf, tmp)
+}
+rm(tmp)
+
+
+
+# Join scoping results to metadata
+analysis_id_lookup <- fuzzyjoin::stringdist_inner_join(ansDf %>% select(`Article ID`, Title) %>%
+                                                         rename(title = Title), 
+                                      sampleDf %>% 
+                                        select(analysis_id, title, abstract, keywords, sample_method),
+                                      by ="title", max_dist=2, ignore_case = TRUE)
+
+if(nrow(analysis_id_lookup) > nrow(ansDf)){ # if there are any dups from join, extract the most complete reference
+  analysis_id_lookup <- revtools::extract_unique_references(analysis_id_lookup, analysis_id_lookup$`Article ID`)
+}
+
+analysis_id_lookup <- analysis_id_lookup %>% # Keep title from original metadata and format/clean data frame
+  rename(title = title.y, random_sample = sample_method) %>%
+  select(-title.x) 
+summary(analysis_id_lookup)
+
+
+
+# pivot data wider -----------
+# add analysis id to ansewrs
+tmp <- ansDf %>%
+  left_join(analysis_id_lookup[,c("Article ID","analysis_id")]) 
+
+# Get column names to pivot
+colnames(tmp)[-1] <- tolower(colnames(tmp))[-1]
+colnames(tmp)[-1] <- gsub(" ","_", colnames(tmp))[-1]
+colnames(tmp)[-1] <- gsub("[:?/]","", colnames(tmp))[-1]
+colnames(tmp)[6:9] <- c("language","population","intervention","primary_research")
+vars2pivot <- colnames(tmp)[grep("language|population|intervetnion|primary|include|oro_type|ecosystem|implemented|upscale|policy|outcome", colnames(tmp))]
+idVar = "analysis_id" # name of id Variable to pivot by
+
+# Format into wide format by column name
+source(here::here("R/format_4_distilBert.R"))
+
+ansWide <- format_4_distilBert(
+  tmp,
+  vars2pivot = vars2pivot,
+  idVar = idVar
+)
+
+# Join with the text the metadata
+ansWide <- ansWide %>% 
+  left_join(analysis_id_lookup %>%
+              select(analysis_id, title, abstract, keywords, random_sample),
+            by="analysis_id") %>%
+  filter(!is.na(abstract)) %>%
+  rename(id = analysis_id, relevant = include) %>%
+  mutate(random_sample = ifelse(random_sample == "random",1,0)) %>% 
+  mutate_if(is.integer, ~replace_na(., 0))
+
+summary(ansWide)
+
+# # write to tab-delimited text file to import into python
+# write.table(ansWide, here::here("data/derived-data/screen-article-answers-formatted/articleAnswers_formatted_2025-03-17.txt"), sep = "\t")
+
+
+```
+
+```{r Articles to predict over}
+
+## connect to database
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                            here::here("data","sqlite-databases","product1.sqlite"),
+                            create=FALSE)
+
+
+# Collect table of unique references metadata
+uniquerefs <- tbl(p1_db, "uniquerefs") %>%
+  select(analysis_id, title, abstract, keywords) %>%
+  collect()
+
+# identify references relevant to mitigation
+pred_OROmitigation <- tbl(p1_db, "pred_oro_any_mitigation") %>%  # mitigation 
+  select(analysis_id, `oro_any.M_Renewables - mean_prediction`, `oro_any.M_Increase_efficiency - mean_prediction`,
+         `oro_any.M_CO2_removal_or_storage - mean_prediction`) %>%
+  collect()
+
+# Filter to articles relevant for at least 1 mitigation ORO
+pred_OROmitigation <- pred_OROmitigation %>%
+  mutate(n_OROs = rowSums(.[2:4] > 0.5)) %>% 
+  filter(1 <= n_OROs) %>%
+  left_join(uniquerefs, by = "analysis_id") %>%
+  filter(!is.na(abstract)) %>%
+  rename(id = analysis_id) 
+  
+
+# Disconnect from database
+dbDisconnect(p1_db)
+
+
+# checks
+sum(ansWide$id %in% pred_OROmitigation$id) == length(ansWide$id) # that all seen ids are present
+anyDuplicated(pred_OROmitigation$id) # no duplicate ids
+
+
+# # write to tab-delimited text file to import into python 
+# write.table(pred_OROmitigation %>% select(-n_OROs), here::here("data/derived-data/screen-article-answers-formatted/all_unseen_mitigation_oros.txt"), sep = "\t")
+```
+
+
+
