@@ -58,4 +58,364 @@ results <- pmap_df(ids, alm)
 # This results in a data.frame with one row per identifier.
 ```
 
-# 
+# Wikipedia page views
+
+source script: https://github.com/nmouquet/RLS_HUM_INT/tree/master
+
+see analysis/02_scrap/
+
+```{r Wikipedia functions}
+#Short cuts to create the names of the oro or files 
+file_to_oro <- function(id){gsub(".RData","",gsub("_"," ",id))}
+oro_to_file <- function(id){paste0(gsub(" ","_",id),".RData")}
+# Change first letter to upper case
+firstup <- function(x) {
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+#get_page_views_lang
+# Will search for views in wikipedia of the given name and in every language
+# get the number of views for the page of 1 name in 1 language
+  get_page_views_lang <- function(lan, nam = name, start_date, end_date){ 
+  # dates must be in format  AAAAMMDDHH example "2015100100"
+  # lan = "en" ; nam = "Apogon capricornis"
+  tryCatch({res <- pageviews::article_pageviews(project = paste(lan, "wikipedia.org", sep = "."), article = nam ,start = start_date, end = end_date)
+  sum(res$views)},
+  error = function(e){
+    res   <- data.frame(project = "wikipedia", language = lan, article = nam, access = 0, agent = 0, granularity = 0, date = 0, views = 0)
+    sum(res$views)
+  })
+  }
+  
+  
+  
+  get_all_page_views_lang <- function(lan, nam = name, start_date, end_date){ 
+  # dates must be in format  AAAAMMDDHH example "2015100100"
+  # lan = "en" ; nam = "Apogon capricornis"
+  tryCatch({res <- pageviews::article_pageviews(project = paste(lan, "wikipedia.org", sep = "."), article = nam ,start = start_date, end = end_date, granularity = "monthly")
+  res},
+  error = function(e){
+    res   <- data.frame(project = "wikipedia", language = lan, article = nam, access = 0, agent = 0, granularity = 0, date = NA, views = 0)
+    res
+  })
+}
+
+# get wiki views
+# concatenates the number of views for 1 species for all languages studied + the total number of views
+  get_wiki_views_totals <- function(name, languages, start_date, end_date){
+
+  #start_date <- "2015100100"
+  #end_date <- "2023023100"
+  #languages <- c("en", "es", "fr","de","ru","pl","nl","it","pt")
+  #name=oro_id
+  
+  lang_views        <- vector(mode = "numeric", length = length(languages)+2)
+  col_lang          <- paste(languages, "views", sep = "_")
+  names(lang_views) <- c("name", col_lang, "total_views")  
+  tot <- 0
+  for (i in 1:length(languages)){
+    i=1
+    lang_views[i+1] <- get_page_views_lang(lan = languages[i], nam = name, start_date, end_date) 
+    tot <- tot + lang_views[i+1]
+  }
+  lang_views[length(lang_views)] <- tot
+  lang_views[1] <- name
+  
+  #cat(name, "DONE \n")
+  # lang_views <- as.data.frame(lang_views)
+  lang_views
+}#eo getwikidata
+
+
+  
+  get_all_wiki_views <- function(name, languages, start_date, end_date){
+
+  #start_date <- "2015100100"
+  #end_date <- "2023023100"
+  #languages <- c("en", "es", "fr","de","ru","pl","nl","it","pt")
+  #name=oro_id
+  
+  lang_views <- data.frame()
+  for (i in 1:length(languages)){
+    # changed to get all the data, rather than get_page_views_lang
+    tmp <- get_all_page_views_lang(lan = languages[i], nam = name, start_date, end_date)
+    colnames(tmp) <- c("project","language","article","access","agent","granularity","date","views")
+    lang_views <- rbind(
+      lang_views,
+      tmp
+    ) 
+  }
+  lang_views$year <- format(lang_views$date, "%Y")
+  
+  #cat(name, "DONE \n")
+  # lang_views <- as.data.frame(lang_views)
+  lang_views
+}#eo getwikidata
+  
+  
+# get_length_wiki_articles
+# Get the nomber of character in all articles concerning the species
+  get_length_wiki_articles <- function(languages, name){
+  
+  #name <- "Pomacanthus imperator"
+  #languages = c("en", "es", "fr","de")
+  
+  wiki_length_lang <- do.call(cbind, lapply(languages, function(lang){
+    
+    tryCatch({
+      wp_info  <- WikipediR::page_info(language = lang, project = "wikipedia", page = name) # info on the wikipage corresponding to the species in a given language  
+      num      <- names(grep(pattern = "fullurl", wp_info$query$pages, value = TRUE))            # get the id number of the page
+      obj_num  <- get(x = paste0(num), pos = wp_info$query$pages)                                # Actually get the object
+      page_url <- obj_num$fullurl                                                                # get the URL of the page
+      # equivalent of the following lines in tidy but i think the usuall wau of coding is easiest to understand piece by piece : sample = url %>% read_html() %>% html_node('body #content #bodyContent #mw-content-text .mw-parser-output table') %>% html_table(fill = TRUE)
+      wiki_text    <- rvest::read_html(page_url)                                                                          # get the content of the wiki page
+      wiki_text    <- rvest::html_nodes(x = wiki_text, 'body #content #bodyContent #mw-content-text .mw-parser-output p') # get the body text of the article (if first time reading a html file, do it step by step to where you are going)
+      wiki_text    <- rvest::html_text(wiki_text,trim = TRUE)                                                            # turn it into a list to be able to count the number of characters
+      nb_word_wiki <- sum(lengths(strsplit(wiki_text, " ")))
+      close(url(page_url))
+      nb_word_wiki
+    }, # end of case where it is fine
+    error = function(e){
+      nb_word_wiki <- 0
+      return(nb_word_wiki)
+    } # end of error
+    ) # end of tryCatch
+  })) # end of wiki_length_lang
+  # sum the length of all pages in differnt languages
+  total            <- sum(wiki_length_lang,na.rm = TRUE)
+  # add it to the vector
+  wiki_length_lang <- cbind(wiki_length_lang, total)
+  # add a column with the name and set column names
+  wiki_length_lang           <- cbind(name, wiki_length_lang)
+  col_lang                   <- paste(languages, "length", sep = "_")
+  colnames(wiki_length_lang) <- c("name", col_lang, "total_length")
+  wiki_length_lang           <- as.data.frame(wiki_length_lang)
+  
+  #cat(name, "DONE \n")
+  wiki_length_lang
+  }
+  
+  
+  
+  
+  
+extract_langviews <- function(url) {
+  # Read the HTML content from the URL
+  page <- rvest::read_html(url)
+  
+  # Extract the table containing the language views data
+  langviews_table <- page %>%
+    rvest::html_node("table") %>%
+    rvest::html_table(fill = TRUE,trim = TRUE)
+  
+  # Select and rename the 'Language' and 'Page title' columns
+  langviews_df <- langviews_table %>%
+    select(Language, `Page title`)
+  
+  return(langviews_df)
+}
+
+install.packages("RSelenium")
+install.packages("wdman")
+library(RSelenium)
+library(wdman)
+rD <- rsDriver()
+rD <- rsDriver(browser = "chrome", chromever = "133.0.6943.127",verbose = F,
+               port= 4445L,#netstat::free_port()
+               extraCapabilities = list(chromeOptions = list(args = c('--headless')))
+               )
+remDr <- rD$client
+remDr$navigate(url)
+
+# Allow some time for JavaScript to load
+Sys.sleep(5)
+
+langviews_df <- extract_langviews(paste0("https://pageviews.wmcloud.org/langviews/?project=en.wikipedia.org&platform=all-access&agent=user&range=latest-20&sort=views&direction=1&view=list&page=", c(gsub(" ","%20","Tidal power"))))
+
+langview <- rvest::read_html(paste0("https://pageviews.wmcloud.org/langviews/?project=en.wikipedia.org&platform=all-access&agent=user&range=latest-20&sort=views&direction=1&view=list&page=", c(gsub(" ","%20","Tidal power")))) 
+
+langview_text    <- rvest::html_nodes(x = langview, 'body #content #bodyContent #mw-content-text .mw-parser-output p') # get the body text of the article (if first time reading a html file, do it step by step to where you are going)
+wiki_text    <- rvest::html_text(wiki_text,trim = TRUE)                                                    
+```
+
+```{r use function to scrap wikipedia - right now just english}
+
+## Set inputs
+# RLS_oro <- read.csv2(file.choose()) #here::here("results","01_build_oro_list","RLS_oro_init.csv")
+# RLS_oro <- data.frame(search_terms = paste(c("tidal power","marine current power","marine energy","ocean thermal","wave power","Osmotic power"), collapse = "; "),
+#                       oro = "Ocean energy") 
+RLS_oro <- read.csv(here::here("data/raw-data/Mitigation-ORO-wikipedia-search-terms.csv"))
+
+path_wta_files <- here::here("outputs","wikipedia_scrap")
+
+mm_oro_list <- RLS_oro$oro
+feed_the_WTA <- RLS_oro$oro[!RLS_oro$oro %in% file_to_oro(gsub(".RData","",list.files(path_wta_files)))]
+feed_the_WTA <- gsub("_"," ",feed_the_WTA)
+
+still=length(feed_the_WTA)
+toend <- length(feed_the_WTA)
+
+
+
+## Loop through inputs to scrap
+for (i in 1:toend) {
+  #i=1
+  oro_id <- feed_the_WTA[i]
+  #oro_id <- "Jenkinsia lamprotaenia"
+  
+  still=still-1
+  
+  cat("==================","\n")
+  cat("N=",which(feed_the_WTA %in% oro_id),"  still ",still," to scrap...","\n\n")
+  
+  # get vector of terms to search
+  terms <- unlist(strsplit(RLS_oro$search_terms[RLS_oro$oro == oro_id], split = "; "))
+  terms <- firstup(terms) # ensure first is upper case
+  
+  # WIKIPEDIA
+  cat("WIKIPEDIA","\n")
+  #Together, the 10 most-viewed languages (English, German, Spanish, Russian, Japanese, French, Polish, Dutch, Italian, and Portuguese) accounted for 81.3% of page views.
+  #https://conbio.onlinelibrary.wiley.com/doi/full/10.1111/cobi.13702
+  
+  # id_lang    <- c("en", "es", "fr","de","ru","pl","nl","it","pt")
+  # langs      <- c("english", "spanish", "french","german","russian","polish","dutch","italian","portuguese")
+  id_lang    <- c("en")
+  langs      <- c("english")
+  start_date <- "2015100100" # the function article_pageviews() from the pageviews R package cannot go further in time
+  end_date   <- "2024123100"
+  period  <- c(mindate = 2015100100, maxdate = 2024123100)
+  
+  Wikipedia <- list()
+  t_count <- 1
+  for (term in terms){
+    
+    lwiki <- list(ER=TRUE,wiki_scrap=NA, ER_count=0)
+    while(lwiki$ER){
+      tryCatch({
+        oro_metadat        <- c(oro_id, term)
+        names(oro_metadat) <- c("oro_type","term")
+        oro_dat_views            <- get_all_wiki_views(name = term, languages = id_lang, start_date = start_date, end_date = end_date)
+        Sys.sleep(sample(seq(0.05, 0.3, by = 0.01), 1))
+        # oro_dat_lenght            <- get_length_wiki_articles(name = term, languages = id_lang)
+        # wiki_scrap <- data.frame(c(oro_metadat, oro_dat_views[2:11],oro_dat_lenght[2:11]))
+        wiki_scrap <- oro_dat_views %>%
+          mutate(
+            oro_type = oro_id,
+            term = term
+          ) %>%
+          relocate(oro_type, term)
+        
+        
+        
+        
+        # cat("  Wiki_views =",wiki_scrap$total_views)
+        # cat("  Wiki_lenght =",wiki_scrap$total_length ,"\n")
+        
+        lwiki$ER <- FALSE
+        lwiki$wiki_scrap <-wiki_scrap 
+        lwiki
+        
+        # Write output to list
+        Wikipedia[t_count] <- list(Wiki_stat=lwiki$wiki_scrap,period=period)
+        t_count = t_count+1
+      },
+      error = function(e){
+        # lwiki$ER <- TRUE
+        cat("Error", lwiki$ER_count, " with the scraping, wait 60s and retry ... ","\n")
+        # Sys.sleep(60)
+          
+        }
+        
+      )
+    }
+    
+    
+    
+  } # terms
+  
+  
+    
+  #Wrap and return 
+  
+  # WTA <- list(Wikipedia=Wikipedia)
+  save(Wikipedia,file=here::here(path_wta_files,paste0(gsub(" ","_",oro_id),".RData")))
+  cat("\n","Done","\n\n")
+
+} #toend
+
+
+#check one file 
+all_files <- list.files(path_wta_files)
+load(here::here(path_wta_files,all_files[1]))
+Wikipedia
+
+all_files[!gsub(".RData","",all_files)%in%RLS_oro$oro]
+
+```
+
+
+
+Perhaps for each wikipedia page I can split into text chunks and do a bootstrapped sentiment analysis on each one? Might be easier than doing all the reddit posts or twitter posts?
+
+Note WikipediR::page_info doesn't work for other languages -- need the translated page name. Maybe use another tecnique to access the translated page name using web scraping?
+
+
+```{r construct aggregated file}
+##III Construct the First WTA_agregated dataframe #add one zoom when possible
+all_files <- list.files(path_wta_files)
+
+WTA_agregated <- do.call(rbind,(lapply(all_files, function(id)
+{
+  
+  #id=all_files[1]
+  #id <- "Bombylius_major.RData"
+  load(here::here(path_wta_files,id))
+  
+  Wikipedia[[1]]
+  
+})))
+
+write.csv(WTA_agregated,here::here("outputs","WTA_annual.csv"),row.names = F)
+
+
+# Calculate aggregate sums
+WTA_agregated <- WTA_agregated %>%
+  group_by(oro_type) %>%
+  summarise(
+    total_views=sum(views)
+  )
+    
+write.csv(WTA_agregated,here::here("outputs","WTA_agregated.csv"),row.names = F)
+  
+
+```
+
+
+```{r plot number of articles vs number of visits for each ORO}
+require(dplyr)
+require(ggplot2)
+
+oroSums <- WTA_agregated 
+
+
+ggplot(WTA_agregated, aes(x=oro_type, y=total_views)) +
+  geom_col()+
+  geom_text(aes(label = scales::number(total_views, accuracy =1, scale_cut = append(scales::cut_long_scale(), 1, 1), 
+                       big.mark = ".", decimal.mark = ",")), vjust=0)+
+  labs(y="Total wikipedia page views since 2015", x="")+
+  theme_minimal()+
+  theme(
+    axis.text.x = element_text(angle=45, hjust=1)
+  )
+
+```
+
+
+
+
+
+
+
+
+
