@@ -20,6 +20,7 @@ library(dplyr)
 library(dbplyr)
 library(R.utils)
 library(ggplot2)
+library(ggalluvial)
 library(tidyr)
 library(stringr)
 library(viridis)
@@ -54,71 +55,64 @@ list with each level is
 - data frame for n policy documents
 - data frame for deployment
 
-id variables: oro_branch, oro_type, country_name, country_iso, component (publication, policy, deployment), variable_name,
+id variables: oro_type, component (publication, policy, deployment), variable_name,
 response variable: y
 
 
 ## N publications
 
-```{r DO NOT RUN -- calculate publication metrics, eval=FALSE}
-## DO NOT RUN, JUST LOAD IN NEXT CHUNK
+```{r read in oro type predictions v1}
 
-## connect to database
+# get id and year metadata
 require(RSQLite)
 p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
-                      here::here("data","sqlite-databases","all_tables_v4.sqlite"),
+                      here::here("data","sqlite-databases","product1.sqlite"),
                                  create=FALSE)
 
 uniquerefs <- tbl(p1_db, "uniquerefs") %>%
-  select(analysis_id, year, affiliation)
-
-predOroType <- tbl(p1_db, "pred_oro_type_long") %>%
-  filter(0.5 <= mean) %>%
-  select(analysis_id, oro_branch, oro_type) %>%
-  left_join(uniquerefs %>% select(analysis_id, year, affiliation), by = "analysis_id") %>%
+  select(analysis_id, year) %>%
   collect()
-
-predBC <- tbl(p1_db, "pred_blue_carbon") %>%
-  filter(0.5 <= `0 - relevance - mean_prediction`) %>%
-  mutate(oro_branch = "Mitigation", oro_type = "Blue carbon") %>%
-  select(analysis_id, oro_branch, oro_type) %>%
-  left_join(uniquerefs %>% select(analysis_id, year, affiliation), by = "analysis_id") %>%
-  collect()
-
-preds <- rbind(predOroType, predBC)
 
 dbDisconnect(p1_db)
 
+# read in predictions and join with year
+predOroType <- read.csv(here::here("outputs/coded-label-predictions/oro_type_v1_predictions.csv")) %>%
+  select(contains("mean_prediction"), id) %>%
+  rename(analysis_id = id) %>%
+  filter(if_any(-analysis_id, ~ . >= 0.5))%>%
+  left_join(uniquerefs, by="analysis_id") %>%
+  mutate(year = as.numeric(year)) %>%
+  filter(!is.na(year))
+
+colnames(predOroType) <- gsub("[.]","-", gsub("...mean_prediction|oro_type.","", colnames(predOroType)))
+
+# how many relevant for each oro type?
+apply(predOroType, 2, function(x) sum(0.5 <= x))
+
+pubs <- predOroType %>%
+  reshape2::melt(id.vars = c("analysis_id", "year"), variable.name = "oro_type", value.name = "mean") %>%
+  filter(0.5 <= mean) %>%
+  group_by(oro_type, year) %>%
+  summarise(
+    y = n_distinct(analysis_id)
+  )%>%
+  mutate(
+    component = "publications",
+    variable_name = "Publications (N)"
+  )
 
 
-## Extract All author affiliations -- just load in results here
 
-countries_ls <- read.csv(file = here::here("data", "external", "list_of_countries", "sql-pays.csv"), sep = ";") |>
-  dplyr::mutate(country = countrycode(sourcevar   = name_en,
-                                      origin      = "country.name",
-                                      destination = "country.name"),
-                iso_code = countrycode(sourcevar   = country,
-                                       origin      = "country.name",
-                                       destination = "iso3c"))
-# save(countries_ls, file = here::here("data", "external", "list_of_countries", "countries_ls.RData"))
+ggplot(pubs, aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type))+
+  geom_alluvium(alpha = 0.8, decreasing=FALSE)+
+  theme_minimal()
 
-# Alternative? But doesn't have the modifications gael made compatable with extract affiliation function
-countries_ls <- data.frame(name_en = countrycode::codelist$country.name.en) %>%
-  mutate(country_iso = countrycode::countrycode(sourcevar   = name_en,
-                                       origin      = "country.name",
-                                       destination = "iso3c"),
-         country=name_en)
-
-source(here::here("R", "functions_to_format.R"))
-
-preds$countries <- extract_all_affiliation(preds$affiliation, countries_ls)
-
-# save(preds, file = here::here("data", "derived-data", "oro_preds_affiliation_country_matches.RData"))
+# save(pubs, file = here::here("data", "derived-data", "mitigationORO_pubs.RData"))
 ```
 
-```{r Load in number of O&C publications to calculate proportion}
+```{r Load in number of O&C publications to calculate proportion?}
 ## Load in predictions from previous chunk
-load(here::here("data", "derived-data", "oro_preds_affiliation_country_matches.RData"))
+load(here::here("data", "derived-data", "mitigationORO_pubs.RData"))
 # Factor aesthetics
 preds$year <- as.numeric(preds$year)
 # preds$oro_type_f <- factor(
@@ -254,6 +248,8 @@ pol_stackedBP
 # save(pols, file = here::here("data", "derived-data", "n_policy_docs.RData"))
 
 ```
+
+
 
 
 ## N deployments
@@ -531,12 +527,66 @@ ggplot(allDeployDat, aes(year, y, col=oro_type))+
     legend.position = "none"
   )
 
-# ggsave(here::here("figures/supplemental/deploymentIndicators.pdf"), width = 15, height=12)
+ggsave(here::here("figures/supplemental/mitigationDeploymentIndicators.pdf"), width = 15, height=12)
 
-# save(allDeployDat, file=here::here("data/derived-data/allDeployDat.RData"))
+save(allDeployDat, file=here::here("data/derived-data/mitigationDeployDat.RData"))
 
 ```
 
 
+# Visualize
+
+```{r plot multiplanel alluvial}
+
+# scale deployment data
+allDeployDat_scale <- allDeployDat %>%
+  filter(!is.na(year)) %>%
+  arrange(oro_type, year) %>%
+  group_by(oro_type) %>%
+  mutate(
+    y=cut(
+      scales::rescale(y, to=c(0,1)), 
+      breaks = seq(0,1, by = 0.1), 
+      labels = seq(0.1,1, by = 0.1)
+      ) %>% as.numeric()# if i do 0,1 it throws an error
+  ) %>%
+  ungroup() 
+  
+
+## plot all together
+
+allComponentDat <- pubs %>%
+  bind_rows(pols) %>%
+  bind_rows(allDeployDat_scale) %>%
+  mutate(
+    component = factor(component, 
+                       levels = c("publications","policy","deployment"), 
+                       labels = c("Academic\n(N publications)", "Legislation\n(N documents)","Action\n(scaled metric)"))
+  )
+
+
+allComponentAlluvial <- ggplot(allComponentDat %>% filter(1980 <= year, year <= 2022), aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type))+
+  # geom_alluvium(alpha = 0.8, decreasing=FALSE)+
+  geom_alluvium(alpha = 0.8, curve_type = "sigmoid", decreasing=FALSE) +
+  labs(y="",x="Year")+
+  facet_grid(component~., scales = "free_y", switch="y")+
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  scale_colour_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  # scale_x_continuous(limits = c(1980,2022))+
+  guides(color = guide_legend(nrow = 3), fill = guide_legend(nrow = 3))+
+  theme_bw()+
+  theme(
+    legend.position = "bottom", 
+    strip.placement = "outside",
+    legend.title = element_blank()
+    )
+
+
+ggsave(
+  plot = allComponentAlluvial, 
+  filename = here::here("figures/2025-06-02_OOSC/allComponentAlluvial.png"),
+  width=7, height=6, units="in", dpi = 600
+    )
+```
 
 
