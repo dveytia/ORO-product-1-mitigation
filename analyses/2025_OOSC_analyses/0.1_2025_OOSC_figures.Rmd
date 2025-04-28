@@ -38,32 +38,9 @@ conflicts_prefer(dplyr::filter)
 
 
 ## AESTHETICS
-factor_aes <- readxl::read_excel(here::here("R/factor_aesthetics.xlsx"))
+factor_aes <- readxl::read_excel(here::here("R/mitigation_factor_aesthetics.xlsx"))
 typeAES <- factor_aes[which(factor_aes$variable == "oro_type"),]
 typeAES <- typeAES[order(typeAES$order),]
-typeAES$frenchLabel <- c("Energies renouvelables", "Élimination ou stockage du CO2", "Augmentation de l'efficacité",
-"Conservation", "Évolution assistée", "Infrastructures et technologies", "Socio-institutionnel")
-# add Blue carbon
-tempDf <- data.frame("oro_type","Blue carbon","Blue carbon","8","#0688c2","Carbone bleu")
-names(tempDf) <- names(typeAES)
-typeAES <- rbind(typeAES, tempDf)
-rm(tempDf)
-typeAES$order <- c(1,2,4:8,3)
-typeAES <- typeAES[order(typeAES$order),]
-
-branchAES <- factor_aes[which(factor_aes$variable == "ORO_branch"),]
-branchAES <- branchAES[order(branchAES$order),]
-branchAES$frenchLabel <- c("Atténuation", "Résilience naturelle", "Adaptation sociétale")
-ecoTypeAES <- factor_aes[which(factor_aes$variable == "ecosystem_type"),]
-ecoTypeAES <- ecoTypeAES[order(ecoTypeAES$order),]
-marSysAES <- factor_aes[which(factor_aes$variable == "marine_system"),]
-marSysAES <- marSysAES[order(marSysAES$order),]
-
-# type to branch lookup table
-typeBranchLookup <- data.frame(
-  oro_type = typeAES$level,
-  oro_branch = c(rep("Mitigation", 4), rep("Nature",2),rep("Societal",2))
-)
 
 
 ```
@@ -224,686 +201,56 @@ pubs <- pubs %>%
 
 
 
-## ALTMETRICS 
-
-```{r write unique dois to .txt file to extract counts}
-## connect to database
-
-require(RSQLite)
-p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
-                      here::here("data","sqlite-databases","all_tables_v4.sqlite"),
-                                 create=FALSE)
-
-uniquerefs <- tbl(p1_db, "uniquerefs") %>%
-  select(analysis_id, doi)
-
-relevantDois <- tbl(p1_db, "pred_oro_type_long") %>%
-  filter(0.5 <= mean) %>%
-  distinct(analysis_id) %>%
-  left_join(uniquerefs, by="analysis_id") %>%
-  select(analysis_id, doi) %>%
-  filter(!is.na(doi)) %>%
-  collect()
-
-
-dbDisconnect(p1_db)
-
-
-# Format dois consistently
-dois <- gsub("https://doi.org/", "", relevantDois$doi)
-length(dois) # 45621 DOIs in total
-
-# read in mitigation dois
-file_con <- file(here::here("outputs/predictedRelevantMitigationOroDois.txt"))
-mitDois <- readLines(file_con)
-close(file_con)
-
-newDois <- dois[!(dois %in% mitDois)]
-length(newDois) # 10457
-
-
-
-# Write to .txt. file
-# file_con <- file(here::here("outputs/predictedRelevantNOTMitigationOroDois.txt"))
-# writeLines(newDois, file_con)
-# close(file_con)
-
-```
-
-
-```{r read in counts data}
-
-## Load data
-
-# Altmetrics counts
-altDat <- read.csv(here::here("data/raw-data/predictedRelevantMitigationOro_AltmetricsCounts.csv"))
-altDat2 <- read.csv(here::here("data/raw-data/predictedRelevantNOTMitigationOro_AltmetricsCounts.csv"))
-keepCols <- intersect(colnames(altDat), colnames(altDat2))
-keepCols <- c("doi", keepCols[grep("count", keepCols)])
-altDat <- rbind(altDat[,keepCols], altDat2[,keepCols]); rm(altDat2)
-altDat$doi <- toupper(altDat$doi)
-
-# Country affiliations for each analysis id
-load(here::here("data", "derived-data", "oro_preds_affiliation_country_matches.RData"))
-
-# Analysis id to doi and oro type lookup
-require(RSQLite)
-p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
-                      here::here("data","sqlite-databases","all_tables_v4.sqlite"),
-                                 create=FALSE)
-
-uniquerefs <- tbl(p1_db, "uniquerefs") %>%
-  select(analysis_id, doi, year)
-
-relevantDois <- tbl(p1_db, "pred_oro_type_long") %>%
-  filter(0.5 <= mean) %>%
-  distinct(analysis_id) %>%
-  left_join(uniquerefs, by="analysis_id") %>% 
-  select(analysis_id, doi, year) %>%
-  filter(!is.na(doi)) %>%
-  collect()
-# Format dois consistently
-relevantDois$doi <- gsub("https://doi.org/", "", relevantDois$doi)
-relevantDois$doi <- toupper(relevantDois$doi)
-relevantDois <- relevantDois[!duplicated(relevantDois$doi),]
-  
-id2typeLookup <- tbl(p1_db, "pred_oro_type_long") %>%
-  filter(0.5 <= mean) %>%
-  select(analysis_id, oro_branch, oro_type) %>%
-  collect()
-
-
-dbDisconnect(p1_db)
-
-
-
-
-
-
-
-
-# merge in 
-altDat <- altDat %>%
-  left_join(relevantDois, by = "doi", copy=TRUE) %>% 
-  left_join(preds %>% distinct(analysis_id, countries), by = c("analysis_id")) %>%
-  filter(!is.na(cited_by_posts_count)) %>%
-  distinct(analysis_id, .keep_all = T) %>%
-  inner_join(id2typeLookup, by = "analysis_id", copy=TRUE) %>%
-  mutate(year = as.numeric(year))
-  
-
-# altDat <- merge.data.frame(altDat, relevantDois, by = "doi", all.x=T, all.y=F)
-# altDat <- merge.data.frame(altDat, id2typeLookup, by = "analysis_id", all.x=T, all.y=F)
-
-summary(altDat)
-
-
-```
-
-```{r sum numbers of altmetrics posts by country oro type and year}
-## Load in predictions from previous chunk
-load(here::here("data", "external", "list_of_countries", "countries_ls.RData"))
-
-
-alts <- data.frame()
-for(g in 1:length(countryGroups)){
-  for(c in 1:length(countryGroups[[g]])){
-
-    # Tabulate number of posts by oro 
-    cName = countries_ls$name_en[countries_ls$country == countryGroups[[g]][c]]
-    tempDf <- altDat[grep(cName, altDat$countries),] %>%
-        filter(!is.na(year)) %>% 
-        group_by(oro_branch, oro_type, year) %>%
-        summarise(n_posts = sum(cited_by_posts_count, na.rm=T),
-                  n_patents = sum(cited_by_patents_count, na.rm = T)) %>%
-        mutate(country_name = countryGroups[[g]][c],
-               country_iso = countryGroupsIso[[g]][c]
-               ) 
-    
-    # Bind all results
-    alts <- rbind(alts, tempDf)
-    
-  }
-  
-}
-rm(tempDf)
-
-# Also calculate as a proportion
-altAllOroSums <- alts %>%
-  group_by(country_iso, year) %>%
-  summarise(
-    total_posts = sum(n_posts, na.rm=T),
-    total_patents = sum(n_patents, na.rm=T)
-  )
-
-alts <- alts %>%
-  left_join(altAllOroSums, by = c("country_iso","year")) %>% 
-  mutate(
-    prop_posts = n_posts/total_posts,
-    prop_patents = n_patents/total_patents
-  )
-
-## Format for consistency with id variables:
-# id variables: oro_branch, oro_type, country_name, country_iso, component (publication, policy, deployment), variable_name,
-# response variable: y
-alts <- alts %>%
-  mutate(
-    component = "Altmetric counts"
-  ) %>%
-  reshape2::melt(id.vars = c("country_name","country_iso","component","oro_branch","oro_type","year"),
-       value.name = "y", variable.name = "variable_name")
-
-
-
-
-# save(alts, file = here::here("data", "derived-data", "altmetrics_counts.RData"))
-```
-
-
-
-```{r quick plots}
-
-ggplot(alts %>% 
-         filter(variable_name %in% c("n_posts","n_patents","prop_posts")), aes(x=year, y=y, fill=oro_type))+
-  geom_col()+
-  facet_wrap(variable_name ~country_name, scales = "free", ncol = 4)+
-  scale_fill_manual(values = typeAES$colour, breaks = typeAES$level)+
-  theme_minimal()+
-  theme(legend.position = "bottom")
-
-ggplot(alts %>% 
-         filter(variable_name %in% c("prop_posts")), aes(x=year, y=y, fill=oro_type))+
-  geom_area()+
-  facet_wrap(oro_type ~country_name, scales = "free", ncol = 4)+
-  scale_fill_manual(values = typeAES$colour, breaks = typeAES$level)+
-  theme_minimal()+
-  theme(legend.position = "bottom")
-
-## just CO2 removal and storage
-ggplot(alts %>% filter(grepl("patent", variable_name), grepl("CO2", oro_type)), #|renewable|eff
-       aes(x=year, y=y, fill = oro_type))+
-  geom_col()+
-  facet_wrap(vars(country_name), scales = "free")+
-  labs(title = "N Patents citing CO2 removal and storage literature", y="N Patents")+
-  theme_minimal()+
-  theme(legend.position = "none")
-```
-
-## Altmetrics Demographics
-
-```{r load and format json data of posts -- DO NOT RUN -- load instead, eval=FALSE}
-require(tidyverse)
-require(jsonlite)
-
-# get dois for france affiliations
-load(here::here("data", "derived-data", "oro_preds_affiliation_country_matches.RData"))
-p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
-                      here::here("data","sqlite-databases","all_tables_v4.sqlite"),
-                                 create=FALSE)
-
-id2doi <- tbl(p1_db, "uniquerefs") %>%
-  select(analysis_id, doi) %>%
-  filter(!is.na(doi)) %>%
-  collect()
-RSQLite::dbDisconnect(p1_db)
-
-franceDois <- preds %>%
-  filter(grepl("France", countries)) %>%
-  distinct(analysis_id) %>%
-  inner_join(id2doi)
-
-
-
-# Get demographics data from json files
-# helpful post
-# https://themockup.blog/posts/2020-05-22-parsing-json-in-r-with-jsonlite/
-
-jsonFiles <- c("predictedRelevantNOTMitigationOro_AltmetricsPosts.json", "predictedRelevantMitigationOro_AltmetricsPosts2.json")
-
-
-get_demographics_data <- function(row_n, raw_json){
-  dat <-raw_json %>% 
-    purrr::pluck(row_n,"demographics","geo") %>% 
-    unlist() %>% 
-    as.data.frame() 
-  if(0 < nrow(dat) & 
-     "doi" %in% names(raw_json %>% purrr::pluck(row_n))){
-    dat <- dat %>% 
-    rownames_to_column() %>%
-    rename_with(.cols=2, ~ "n_posts") 
-    dat$source = do.call(c, lapply(strsplit(dat$rowname, "[.]"), function(x) x[1]))
-    dat$country_iso2 = do.call(c, lapply(strsplit(dat$rowname, "[.]"), function(x) x[2]))
-    dat$doi <- raw_json %>% purrr::pluck(row_n,"doi")
-    dat$rowname = NULL
-    dat <- dat[,c("doi","source","country_iso2","n_posts")]
-    return(as.list(dat))
-  }
-}
-
-altDem <- data.frame()
-for(file in jsonFiles){
-  raw_json <- read_json(here::here("data/raw-data", file))
-  tmp <- 1:length(raw_json) %>%
-    map_dfr(get_demographics_data, raw_json = raw_json) %>%
-    filter(doi %in% franceDois$doi)
-  altDem <- rbind(altDem, tmp)
-}
-rm(raw_json, id2doi, preds) # remove large files
-
-
-# save(altDem, file=here::here("data/derived-data/frenchDois_altmetricsDemographics.RData"))
-
-```
-
-```{r quick map of french altmetrics posts}
-library(dplyr)
-library(ggplot2)
-library(sf)
-library(rnaturalearth)
-library(egg)
-#countries <- map_data("world")
-
-# hack for error with coord_cartesian in ggplot
-# https://stackoverflow.com/questions/78227158/big-issue-with-ggplot2-r-and-coord-cartesian
-if(!exists("obj_is_vector")){
-  obj_is_vector = function(x){TRUE}
-}
-
-
-## Load Data
-# reload altmetrics data posts on french research
-load(here::here("data/derived-data/frenchDois_altmetricsDemographics.RData"))
-
-# load population data from World Bank to weight by population
-popDat <- read.csv(here::here("data/external/worldBankIndicator_SP.POP.TOTL/API_SP.POP.TOTL_DS2_en_csv_v2_13582.csv"), skip = 4) %>%
-  select(-`Indicator.Name`, -`Indicator.Code`)%>%
-  rename(country_iso = `Country.Code`, country_name = `Country.Name`) %>%
-  reshape2::melt(id.vars = c("country_iso","country_name"), variable.name = "year", value.name = "population")%>%
-  mutate(year = as.numeric(gsub("X","", year)),
-         country_iso2 = countrycode::countrycode(country_iso, "iso3c","iso2c"),
-         # country_iso2 = countrycode::countrycode(country_name, "country.name","iso2c")
-         ) %>%
-  filter(year == 2023) %>%
-  select(country_iso, country_name, country_iso2, population) %>%
-  na.omit()
-
-# Download countries polygons
-world_robinson <- ne_countries(type = "countries", 
-                   scale = "medium",
-                   returnclass = "sf") |>
-  # transform to desired projection
-  st_transform("ESRI:54030")
-# This is a dummy column used to fill in mean values
-world_robinson$value <- rnorm(242,0.5,0.1)
-
-
-# Make quick map to check robinson projection works
-world_robinson |>
-  ggplot(aes(fill = value, color = value)) +
-  geom_sf() +
-  coord_sf(expand = FALSE)+
-  theme_minimal()
-
-
-
-# Add Data to Map by country
-dfMap <- altDem |>
-  # Sum posts across different sources and articles
-  group_by(country_iso2) |>
-  summarise(n_posts = sum(n_posts, na.rm=T)) |>
-  # Calculate posts as proportion of population
-  left_join(popDat, by = "country_iso2") %>%
-  mutate(n_posts_PopWeighted = n_posts/population) %>%
-  rename(iso_a2_eh = country_iso2)
-# Join to map data
-dfMap <- merge(world_robinson, dfMap, by = c("iso_a2_eh"), all.x = TRUE)
-
-
-# exponential colour scale
-# brks = seq(min(dfMap$n_posts, na.rm = TRUE), max(dfMap$n_posts, na.rm = TRUE), length.out = 15)
-# a=1
-# b= 1.5
-# vals = scales::rescale(a*(b^(1:length(brks))), to = c(0,1))
-# #plot(vals)
-
-
-ggplot(data = dfMap, aes(fill = log(n_posts), color = log(n_posts))) +
-  geom_sf() +
-  coord_sf(expand = FALSE, clip="off")+
-  scale_fill_viridis_c()+
-  scale_color_viridis_c(guide="none")+
-  scale_y_continuous(breaks = seq(-90,90, length.out=5))+
-  labs(fill = "log(N Posts)")+
-  # scale_fill_stepsn(breaks = brks, colors = viridis::viridis(length(brks)),
-  #                   values = vals)+
-  # scale_color_stepsn(breaks = brks, colors = viridis::viridis(length(brks)),
-  #                    values = vals)+
-  theme_minimal()+
-  theme(legend.position = "bottom",
-        panel.grid.major = element_line(colour = "#383535"),
-        plot.margin = unit(c(rep(0.5, 4)), 'cm'))
-
-# ----------------------- gael method -----------------
-
-# My modifications to the functions
-format_data2map <- function(data, PROJ){
-  
-  ### Load graticules and other stuffs
-  load(here::here("data", "data_map.RData"))
-  # load(here::here("data", "geo_data_1.RData"))
-  
-  
-  ### Modify projection
-  NE_box_2 <- sf::st_sfc(sf::st_polygon(list(cbind(c(rep(180,1801), rep(-180,1801), 180), 
-                                                   c(rev(seq(-90, 90, by = 0.1)), seq(-90, 90, by = 0.1), 90)))),
-                         crs = sf::st_crs(geo_data))
-  
-  grid           <- sf::st_transform(geo_data, PROJ)
-  borders        <- sf::st_transform(geo_borders, PROJ)
-  box_rob        <- sf::st_transform(NE_box_2, PROJ)
-  NE_graticules  <- sf::st_as_sf(NE_graticules)
-  graticules_rob <- sf::st_transform(NE_graticules, PROJ)
-  
-  
-  ## project long-lat coordinates for graticule label data frames (two extra columns with projected XY are created)
-  prj.coord <- sf_transform_xy(data.frame(x=lbl.Y$lon, y=lbl.Y$lat), target_crs=PROJ, source_crs = "EPSG:4326")
-  lbl.Y.prj <- cbind(prj.coord, lbl.Y)
-  names(lbl.Y.prj)[1:2] <- c("X.prj", "Y.prj")
-  
-  ## position label 
-  lbl.Y.prj$X.prj  <- (-(lbl.Y.prj$X.prj))
-  lbl.Y.prj$X.prj2 <- lbl.Y.prj$X.prj#-1.10e6
-  
-  ## X
-  prj.coord <- sf_transform_xy(data.frame(x=lbl.X$lon, y=lbl.X$lat), target_crs=PROJ, source_crs = "EPSG:4326")
-  lbl.X.prj <- cbind(prj.coord, lbl.X)
-  names(lbl.X.prj)[1:2] <- c("X.prj", "Y.prj")
-  lbl.X.prj <- subset(lbl.X.prj, Y.prj < 0)
-  
-  
-  ### Format all data in list
-  data_map <- list("data"       = data, 
-                   "borders"    = borders, 
-                   "graticules" = graticules_rob,
-                   "box"        = box_rob,
-                   "lat_text"   = lbl.Y.prj,
-                   "lon_text"   = lbl.X.prj)
-  
-  return(data_map)
-  
-}
-
-univariate_map <- function(data_map, eez = NULL, color_scale, second.var, midpoint, title_color, title_size, show.legend, name = NULL){
-  
-  ### Produce the map
-  map <- ggplot2::ggplot() +
-    
-    ## DBEM output grid
-    ggplot2::geom_sf(data    = data_map$data,
-                     mapping = ggplot2::aes(fill     = layer,
-                                            geometry = geometry),
-                     color   = "grey10",
-                     size    = 0.1,
-                     show.legend = show.legend) +
-
-    
-    # Add graticules
-    # ggplot2::geom_sf(data     = data_map$graticules,
-    #                  linetype = "dotted",
-    #                  color    = "grey70",
-    #                  size     = 0.4) +
-    
-    ## Add borders grid
-    # ggplot2::geom_sf(data   = data_map$borders,
-    #                  colour = "grey10",
-    #                  fill   = "transparent",
-    #                  size   = 0.1) +
-  
-    ggplot2::geom_sf(data   = data_map$box, 
-                     colour = "black", 
-                     fill   = NA, 
-                     size   = 0.1) +
-      
-    
-    ggplot2::theme_void() +
-    
-    ## Add latitude and longitude labels
-    ggplot2::geom_text(data = data_map$lat_text, mapping = ggplot2::aes(x = X.prj2-1*10e5, y = Y.prj,          label = lbl), color = "grey20", size = 1.5) +
-    ggplot2::geom_text(data = data_map$lon_text, mapping = ggplot2::aes(x = X.prj,         y = Y.prj-0.5*10e5, label = lbl), color = "black",  size = 1.5) 
-    
-    # ggplot2::labs(fill = legend)
-  
-  if(!("trends" %in% color_scale)){
-
-    map <- map +
-
-    ggplot2::guides(size = ggplot2::guide_legend(title = title_size, title.position = "right", title.hjust = 0.5, ncol = 1, override.aes = list(fill = "transparent")),
-                    fill = ggplot2::guide_colourbar(title = title_color, title.position = "right", barwidth = 0.7))
-
-  }
-
-  if("trends" %in% color_scale){
-     map <- map 
-       # ggplot2::guides(size = ggplot2::guide_legend(title = title_color, title.position = "right", title.hjust = 0.5, ncol = 1, override.aes = list(fill = "transparent")))
-       #                 fill = ggplot2::guide_coloursteps(title = title_color, title.position = "right", barwidth = 0.7)) 
-  }
-    
-    ## Theme
-    map <- map +
-      ggplot2::theme(panel.grid.major.x = ggplot2::element_line(color = NA),
-                     panel.background   = ggplot2::element_blank(),
-                     axis.text          = ggplot2::element_blank(),
-                     axis.ticks         = ggplot2::element_blank(), 
-                     axis.title         = ggplot2::element_blank(),
-                     plot.margin        = ggplot2::unit(c(0,0,0,0), "cm"),
-                     plot.title         = ggplot2::element_text(size  = 12, 
-                                                                face  = "bold", 
-                                                                hjust = 0.5, 
-                                                                vjust = -0.5),
-                     legend.title       = ggplot2::element_text(size  = 12, 
-                                                                face  = "bold", 
-                                                                hjust = 0.5, 
-                                                                vjust = 0.5, angle = 90),
-                     legend.title.align = 0.5, 
-                     legend.direction   = "vertical",
-                     legend.position     = "right",
-                     legend.justification = "center",
-                     legend.key           = element_rect(color = "white"),
-                     legend.text        = ggplot2::element_text(size = 12))
-  
-  
-  if(!is.null(midpoint)){
-    map <- map + 
-      ggplot2::scale_fill_gradient2(low  = color_scale[1], 
-                                    high = color_scale[3],
-                                    mid  = color_scale[2],
-                                    midpoint = midpoint,
-                                    na.value = "grey80")
-  }
-  
-  
-  if(!("trends" %in% color_scale)){
-    map <- map + 
-      ggplot2::scale_fill_gradientn(colors   = color_scale,
-                                    # values   = vals_colors_scale,
-                                    na.value = "grey80") 
-  }
-  
-  
-  if("trends" %in% color_scale){
-    map <- map +
-      ggplot2::scale_fill_manual(name = "Slope",
-                                 values   = c(viridis::mako(length(unique(data_2_map_panelB$data$layer))-2, direction = 1), "#e6df85"),
-                                 na.value = "grey80")
-  }
-  
-  
-  if(!is.null(eez)){
-    
-    map <- map + 
-      
-      # ggnewscale::new_scale_fill() +
-      
-      ggplot2::geom_sf(data    = eez,
-                       mapping = ggplot2::aes(fill     = layer,
-                                              geometry = geometry),
-                       color   = "grey10",
-                       size    = 0.1,
-                       show.legend = FALSE) 
-      
-      if(!("trends" %in% color_scale)){
-        map <- map + 
-          ggplot2::scale_fill_gradientn(colors   = color_scale,
-                                        # values   = vals_colors_scale,
-                                        na.value = "grey80") 
-      }
-    
-    
-      if("trends" %in% color_scale){
-        map <- map + 
-          ggplot2::scale_fill_manual(name = "Slope",
-                                     values   = c(viridis::mako(length(unique(data_2_map_panelB$data$layer))-2, direction = 1), "#e6df85"),
-                                     na.value = "grey80") +
-          ggplot2::theme(legend.title = ggplot2::element_text(size  = 12, 
-                                                              face  = "bold",
-                                                              hjust = 0,
-                                                              angle = 0))
-      }
-      
-      # ggplot2::scale_fill_gradientn(colors   = color_scale,
-      #                               # values   = vals_colors_scale,
-      #                               na.value = "grey80")
-    
-  }
-  
-  if(!is.null(second.var)){
-    map <- map +
-      stat_sf_coordinates(data        = data_map$data |> filter(! group_land %in% c("Island", "AMUNRC")),
-                          mapping     = aes(size = get(second.var)),
-                          colour      = "darkblue",
-                          # fill        = "grey90",
-                          # size        = 1,
-                          show.legend = TRUE) +
-      scale_size(range = c(0,3))
-  }
-  
-  ### Save map
-  if(! is.null(name)) {
-    
-    ggplot2::ggsave(here::here("figures", paste0(name, ".pdf")), width = 7, height = 4.5, device = "pdf")
-    
-  }
-  
-  return(map)
-  
-  
-}
-
-
-# Format data to plot
-data_2_map <- format_data2map(data = dfMap %>% mutate(layer = log(n_posts_PopWeighted)),
-                              PROJ = "+proj=robin +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
-
-mapGael <- univariate_map(data_map          = data_2_map ,
-                           color_scale       = viridisLite::viridis(10),
-                           second.var        = NULL,
-                          midpoint = NULL,
-                           # vals_colors_scale = NULL,
-                           title_color       = "log(N posts/Population)",
-                           title_size        = NULL,
-                           show.legend       = TRUE)
-
-## Plot and save
-mapGael+theme(plot.margin = unit(c(0,0.5, 0,0), "cm"))   
-# ggplot2::ggsave(here::here("figures", "mapFranceDoisAltmetricsPosts.pdf"), width = 7, height = 4.5, device = "pdf")
-```
-
-## N Wikipedia page views?
 
 
 
 ## N policy documents
 
-```{r}
+```{r read in policy documents}
 
 ## Read in and format policy matches
 
-policyDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
-  rename(country_name = Country_short, year=Year) %>%
+pols <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
+  rename(country_name = Country_short, year=Year, oro_type = oroType) %>%
   filter(1975 < year,
          Binding.legislation == "True", 
          National.level == "True"
          ) %>%
   mutate(
     oro_type = case_when(
-      grepl("MRE",oroType) ~ "Marine renewable energy",
-      oroType == "M_CDR_bc" ~ "Blue carbon",
-      grepl("CDR_oae|CDR_biopump|CDR_cult",oroType) ~ "CO2 removal or storage",
-      grepl("CDR",oroType) ~ "CO2 removal or storage",
-      grepl("CCS",oroType) ~ "CO2 removal or storage",
-      grepl("Incr",oroType) ~ "Increase efficiency",
-      grepl("N_cons",oroType) ~ "Conservation",
-      grepl("N_ass",oroType) ~ "Human assisted evolution",
-      grepl("built",oroType) ~ "Built infrastructure & technology",
-      grepl("socInst",oroType) ~ "Socio-institutional",
+      oro_type == "M_MRE_general" ~ "MRE-Located", ## Note to fix this later
+      oro_type == "M_MRE_ocean" ~ "MRE-Ocean",
+      oro_type == "M_MRE_located" ~ "MRE-Located",
+      oro_type == "M_MRE_bio" ~ "MRE-Bio",
+      oro_type == "M_Incr_eff" ~ "Efficiency",
+      oro_type == "M_CCS" ~ "CCS",
+      oro_type == "M_CDR_bc" ~ "CDR-BC",
+      oro_type == "M_CDR_oae" ~ "CDR-OAE",
+      oro_type == "M_CDR_biopump" ~ "CDR-BioPump",
+      oro_type == "M_CDR_cult" ~ "CDR-Cult",
+     
       TRUE ~ "Other"
     )) %>%
-  left_join(
-    typeBranchLookup, 
-    by = "oro_type"
+  filter(oro_type != "Other") %>%
+  # Tabulate all documents
+  group_by(oro_type, year) %>%
+  summarise(y = n_distinct(search_id)) %>%
+  mutate(
+    component = "policy",
+    variable_name = "Legislation documents (N)"
   )
 
 
 
 
-## Tabulate the number of documents
-pols <- data.frame()
-for(g in 1:length(countryGroups)){
+## quick plot
   
-  for(c in 1:length(countryGroups[[g]])){
-    
-    # Tabulate number of policy documents
-    cName = countryGroups[[g]][c] # right now this excludes overeas territories
-    
-    tempDf <- policyDat[grep(countryGroups[[g]][c], policyDat$country_name),] %>%
-      group_by(oro_branch, oro_type, year) %>%
-      summarise(n_policy = n_distinct(search_id)) %>%
-      mutate(
-        country_name = countryGroups[[g]][c],
-        country_iso = countryGroupsIso[[g]][c]
-      )
-    
-    # Bind all results
-    pols <- rbind(pols, tempDf)
-    
-  }
-  
-}
-rm(tempDf)
-
-
-
-## Format for consistency with id variables:
-# id variables: oro_branch, oro_type, country_name, country_iso, component (publication, policy, deployment), variable_name,
-# response variable: y
-pols <- pols %>%
-  mutate(
-    component = "policy"
-  ) %>%
-  select(country_name, country_iso,component, oro_branch, oro_type, year, n_policy) %>%
-  reshape2::melt(id.vars = c("country_name","country_iso","component","oro_branch","oro_type","year"),
-       value.name = "y", variable.name = "variable_name")
-
-
-
-  
-ggplot(pols, aes(x=year, y=y, fill=oro_type))+
-  geom_col()+
-  facet_wrap(vars(country_name), scales = "free")+
-  scale_fill_manual(values = typeAES$colour, breaks = typeAES$level)+
+pol_stackedBP <- ggplot(pols, aes(x=year, y=y, fill=oro_type))+
+  geom_col(position="stack")+
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level)+
   theme_minimal()+
   theme(legend.position = "bottom")
-
+pol_stackedBP
 # save(pols, file = here::here("data", "derived-data", "n_policy_docs.RData"))
 
 ```
@@ -912,7 +259,7 @@ ggplot(pols, aes(x=year, y=y, fill=oro_type))+
 ## N deployments
 
 
-### mCDR 
+
 
 Difficult to get a dataset with enough longevity, so could combine indicators?
 
@@ -937,52 +284,34 @@ I think for now, stick with patents and field trials, and maybe OceanNET CDR com
 ## load data
 # Data source: IRENA renewable electricity statistics (https://www.irena.org/Publications/2024/Jul/Renewable-energy-statistics-2024)
 
-MreDat <- readxl::read_excel(here::here("data/external/IRENA-electricity-statistics-by-country-year-2024.xlsx"),
+MreDat <- readxl::read_excel(here::here("data/raw-data/external/IRENA-electricity-statistics-by-country-year-2024.xlsx"),
                          sheet = "Country") %>% 
   filter(
-    grepl(paste(unlist(countryGroups), collapse="|"), Country), #grepl("France|French|Germany|United Kingdom|United States of", Country, ignore.case = T),
     Technology %in% c("Marine energy","Offshore wind energy")
   ) %>% 
   mutate(
-    Country = countrycode::countrycode(Country, origin = "country.name", "country.name")
+    oro_type = case_when(
+      Technology == "Marine energy" ~ "MRE-Ocean",
+      Technology == "Offshore wind energy" ~ "MRE-Located"
+    )
   ) %>%
-  filter(
-    Country %in% unlist(countryGroups)
-  ) %>%
-  rename(country_name = Country, MRE_technology = Technology, year = Year)  %>%
-  group_by(year,country_name) %>% # MRE_technology, 
-  summarise(`Electricity Installed Capacity (MW)` = sum(`Electricity Installed Capacity (MW)`, na.rm=T)) %>%
+  rename(year = Year)  %>%
+  group_by(year,oro_type) %>% 
+  summarise(y = sum(`Electricity Installed Capacity (MW)`, na.rm=T)) %>%
   # add identification columns
   mutate(
     year = as.numeric(year),
     component = "deployment",
-    oro_branch = "Mitigation",
-    oro_type = "Marine renewable energy"
-  )%>%
-  left_join(data.frame(
-    country_name = unlist(countryGroups),
-    country_iso = unlist(countryGroupsIso)
-    ),
-    by="country_name") %>%
-  select(country_name, country_iso,component, oro_branch, oro_type, year, `Electricity Installed Capacity (MW)`) %>%
-  reshape2::melt(id.vars = c("country_name","country_iso","component","oro_branch","oro_type","year"),
-       value.name = "y", variable.name = "variable_name")
+    variable_name = "Electricity Installed Capacity (MW)"
+    
+  )
 
-unique(MreDat$country_name)
-unique(MreDat$country_iso)
+ggplot(MreDat, aes(x=year, y=y, fill=oro_type))+
+  geom_col(position="stack")+
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level)+
+  theme_minimal()+
+  theme(legend.position = "bottom")
 
-# it seems France data for Offshore wind only has the installation for Saint Nazarre (480 MW starting in 2022), but missing Saint-Brieuc (496 MW starting in 2023) and Fecamp (497 MW starting in 2023)
-# source: https://www.eoliennesenmer.fr/parcs-et-projets-eoliens-en-france?f%5B0%5D=o%3A397
-# And https://www.statistiques.developpement-durable.gouv.fr/edition-numerique/chiffres-cles-mer-littoral-2024/14-energies-marines-renouvelables#:~:text=La%20France%20a%20pour%20ambition,de%2023%20%25%20fix%C3%A9%20pour%202020
-# So overwrite france data
-MreDat$y[MreDat$country_name == "France" &
-         MreDat$year %in% c(2022,2023)] <- c(480, c(480+496+497))
-
-# A recent installation is also missing from the US:South Fork Wind Farm off Rhode Island, which began delivering 132 MW of power to New York's Long Island in November 2023
-# https://www.energy.gov/eere/wind/offshore-wind-market-report and
-# https://www.4coffshore.com/news/u.s.-offshore-wind-industry-saw-significant-growth-in-2023-nid30200.html
-MreDat$y[MreDat$country_name == "United States" &
-         MreDat$year %in% c(2023)] <- c(132)
 
 ```
 
@@ -990,440 +319,217 @@ MreDat$y[MreDat$country_name == "United States" &
 ```{r Increase efficiency - domestic freight energy efficiency}
 # IEA domestic freight transport energy efficiency (gCO2/tkm)
 # https://www.iea.org/data-and-statistics/data-product/energy-efficiency-indicators
-eff <- readxl::read_excel(here::here("data/external/IEA-shipping-energy-efficiency_France_Germany_United Kingdom_United States.xlsx"), sheet = "Data_countries") %>%
-   mutate(
-    year = as.numeric(year),
-    carbon_intensity_gCO2_per_tkm = as.numeric(carbon_intensity_gCO2_per_tkm), # NAs will be introduced by coercion - ok
-    component = "deployment",
-    oro_branch = "Mitigation",
-    oro_type = "Increase efficiency"
-  )%>%
-  left_join(data.frame(
-    country_name = unlist(countryGroups),
-    country_iso = unlist(countryGroupsIso)
-    ),
-    by="country_name") %>%
-  select(country_name, country_iso,component, oro_branch, oro_type, year, carbon_intensity_gCO2_per_tkm) %>%
-  reshape2::melt(id.vars = c("country_name","country_iso","component","oro_branch","oro_type","year"),
-       value.name = "y", variable.name = "variable_name") %>%
+eff <- readxl::read_excel(
+  here::here("data/raw-data/external/IEA-shipping-energy-efficiency.xlsx"), 
+  sheet = "Data") %>%
   mutate(
-    variable_name = "carbon intensity (gCo2/tkm)"
+    y= 1/carbon_intensity_gCO2_per_tkm,
+    year = as.numeric(format(as.Date(paste0(year,"-01-01")), "%Y")),
+    variable_name = "Shipping carbon efficiency (tkm/gCO2)",
+    component = "deployment",
+    oro_type = "Efficiency"
+    ) 
+
+ggplot(eff, aes(x=year, y=y, fill=oro_type))+
+  geom_col()+
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level)+
+  theme_minimal()+
+  theme(legend.position = "bottom")
+
+
+```
+
+For CCS download from [oil and gas climate initiative](https://www.ogci.com/ccus/co2-storage-catalogue). Choose to sum the variable of Storage Capacity: Those quantities of Total Storage Resources anticipated to be commercially accessible in the characterized geologic formation by application of development projects from a given date forward under defined conditions. Commercial Storage Resources must further satisfy four criteria: The target geologic formation must be discovered and characterized (including containment); it must be possible to inject at the required rates; the development project must be commercial; and the storage resource must remain, as of the evaluation date (i.e., not previously used for storage), on the development project(s) applied (https://www.ogci.com/ccus/co2-storage-catalogue/co2-storage-catalogue-about-the-catalogue) -- but only if associated with a project 
+
+```{r CCS}
+
+
+ccsDat <- readxl::read_excel(here::here("data/raw-data/external/CRSC_CYCLE_4_FINAL_2024_160724.xlsx")) %>%
+  filter(grepl("shore|sea", area, ignore.case=T), !is.na(year_of_publication)) %>%
+  filter(project_spec == "YES") %>%
+  rename(year = year_of_publication) %>%
+  group_by(year) %>%
+  summarise(
+    y = sum(sum_low, sum_mid, sum_high, na.rm=T) #sum(stored_low, stored_mid, stored_high, na.rm=T)
+  ) %>%
+  mutate(
+    year = as.numeric(year),
+    variable_name = "Storage capacity (Mt)",
+    component = "deployment",
+    oro_type = "CCS"
   )
+
+ggplot(ccsDat, aes(year, y))+
+  geom_col()
 
 ```
 
 
 Maybe can relate blue carbon to BC variable crossed with restoration
 
-```{r blue carbon - number of restoration projects Duarte et al 2020}
-bc_restoration <- readxl::read_excel(here::here("data/external/Duarte2020RestorationDataSet-1.xlsx"),
-                                     sheet = "Data")
-
-source(here::here("R", "functions_to_format.R"))
-if(exists("countries_ls") == FALSE){
-  load(here::here("data", "external", "list_of_countries", "countries_ls.RData"))
-}
-
-
-bc_restoration$countries <- extract_all_affiliation(bc_restoration$Location, countries_ls)
-bc_restoration$countries[is.na(bc_restoration$countries) &
-                           grepl(paste(state.name, collapse="|"), bc_restoration$Location)] <- "United States"
-
-# Note this doesn't catch everything -- better method would use coordinates to bin to country by land and eez
-bc_restoration <- bc_restoration %>%
-  tidyr::separate_rows(countries, sep = ", ") %>%
-  rename(country_name = countries) %>%
-  filter(grepl(paste(unlist(countryGroups), collapse = "|"), country_name),
-         Habitat %in% c("Mangrove","Saltmarshes","Seagrass meadows")) %>% # Omit Oyster Reefs and Coral Reefs
+```{r CDR-BC - number of restoration projects Duarte et al 2020}
+bc_restoration <- readxl::read_excel(here::here("data/raw-data/external/Duarte2020RestorationDataSet-1.xlsx"),
+                                     sheet = "Data")%>%
+  filter(Habitat %in% c("Mangrove","Saltmarshes","Seagrass meadows")) %>% # Omit Oyster Reefs and Coral Reefs
+  # Sum the number of projects /year
   mutate(year = as.numeric(Year)) %>%
-  group_by(country_name, year) %>%
+  group_by(year) %>%
   summarise(
-    n_restoration_projects = n()
+    y = n()
   ) %>%
+  ungroup() %>% 
+  # # Calculate cumulative value?
+  # tidyr::complete(year, fill = list(y = 0)) %>%
+  # arrange(year) %>%
+  # mutate(y = cumsum(y)) %>%
   mutate(
+    variable_name = "BC restoration projects (N)",
     component = "deployment",
-    oro_branch = "Mitigation",
-    oro_type = "Blue carbon"
-  )%>%
-  left_join(data.frame(
-    country_name = unlist(countryGroups),
-    country_iso = unlist(countryGroupsIso)
-    ),
-    by="country_name") %>%
-  select(country_name, country_iso,component, oro_branch, oro_type, year, n_restoration_projects) %>%
-  reshape2::melt(id.vars = c("country_name","country_iso","component","oro_branch","oro_type","year"),
-       value.name = "y", variable.name = "variable_name") %>%
-  mutate(
-    variable_name = "Blue carbon restoration projects (cumulative N)"
-  ) %>%
-  # calculate cumulative sum
-  group_by(country_name) %>% arrange(year) %>% mutate(y = cumsum(y)) 
+    oro_type = "CDR-BC"
+  )
 
-# head(bc_restoration)
-# 
-# ggplot(bc_restoration, aes(x=year, y=y, col=country_name))+
-#   geom_col()+
-#   facet_wrap(vars(country_name))
+head(bc_restoration)
+
+ggplot(bc_restoration, aes(x=year, y=y))+
+  geom_col()
 ```
 
 Other CDR not available at country level. 
 Make proportional to amount of available habitat area? https://essd.copernicus.org/articles/16/3433/2024/#&gid=1&pid=1 -- van Zelst et al 2022
 
-Also france spending on restoration projects
-
-OECD database links:
-(Sustainable ocean economy)[https://data-explorer.oecd.org/vis?lc=en&tm=coast%20protection&pg=0&snb=3&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_SOE%40DF_SOE&df[ag]=OECD.ENV.EPI&df[vs]=1.0&dq=AUS.A....&pd=2017%2C&to[TIME_PERIOD]=false]
-(Coastal adaptation inventions)[]
-
-```{r Conservation - oecd percent marine protected coastal area}
-
-## For conservation, variable: Extent of marine protected area, All, including data recorded as points, unit: percentage of EEZ
-# country-level protected area coverage for terrestrial, marine and coastal domains calculated from the World Database on Protected Areas https://www.protectedplanet.net/en/thematic-areas/wdpa?tab=WDPA
-# https://data-explorer.oecd.org/vis?pg=0&bp=true&snb=3&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_PA%40DF_PROT_AREA&df[ag]=OECD.ENV.EPI&df[vs]=&pd=%2C&dq=.A.TERRESTRIAL.PT_LAR.ALL_INC_P.TCEOA.CNTRY&to[TIME_PERIOD]=false&lc=en
-
-coastPr <- read.csv(here::here("data/external/OECD-coast-protection-area-all-countries.csv")) %>%
-  rename(
-    country_name = Reference.area,
-    year= TIME_PERIOD,
-    y = OBS_VALUE
-  ) %>%
-  filter(
-    Measure == "Extent of marine protected area",
-    UNIT_MEASURE == "PT_EEZ",
-    IUCN.management.categories == "All, including data recorded as points",
-    country_name %in% unlist(countryGroups)
-  ) %>%
+```{r CDR-OAE CDR-Cult CDR-BioPump}
+# Ocean visions field trials 
+fieldTrials <- readxl::read_excel(
+  here::here("data/raw-data/external/Ocean-visions-mCDR-field-trial-database.xlsx"),
+  sheet = "Data") %>%
   mutate(
-    variable_name = "Extent of marine protected area (% EEZ)",
-    oro_branch = "Nature",
-    oro_type = "Conservation",
-    component = "deployment"
+    `Start of Pilot` = replace(`Start of Pilot`, `Start of Pilot` %in% c("5.12.2023","2023"), as.numeric(as.Date("2023-01-01"))),
+    trialID = row_number()
+  ) %>%
+  mutate(year = as.Date(as.numeric(`Start of Pilot`), origin = "1899-12-30")) %>%
+  mutate(year = ifelse(year == as.Date("1952-12-30"), as.Date("2023-01-01"), year)) %>%
+  mutate(year = as.Date(year, origin = as.Date("1970-01-01"))) %>%
+  separate_rows(`All CDR Methods`, sep=",") %>% 
+  mutate(
+    oro_type = case_when(
+      grepl("OAE|Alkalinity|Weathering", `All CDR Methods`) ~ "CDR-OAE",
+      grepl("Biomass|Macroalgae|Cultivation", `All CDR Methods`) ~ "CDR-Cult",
+      grepl("Upwelling", `All CDR Methods`) ~ "CDR-BioPump",
+      TRUE ~ "Other"
+    ),
+    year = as.numeric(format(year, "%Y")),
+    source = "Field trial"
+  ) %>%
+  filter(!is.na(year) & oro_type != "Other") 
+  # group_by(oro_type, year) %>%
+  # summarise(
+  #   y=n_distinct(trialID)
+  # ) %>%
+  # mutate(
+  #   variable_name = "Field Trials (N)",
+  #   component = "deployment"
+  # )
+
+
+# Founding year of mcdr startups
+# Need to de-duplicate and add year  
+
+GESAMP_companies <- readxl::read_excel(
+  here::here("data/raw-data/external/GESAMP_wg41_ocean_climate_intervention_projects_31_may_2024.xlsx"), sheet="AllTables") %>%
+  select(Company, Type, Website) %>%
+  mutate(
+    Company = trimws(gsub("[[:punct:]]", "", Company)),
+    source = "GESAMP WG 41"
   )%>%
-  left_join(data.frame(
-    country_name = unlist(countryGroups),
-    country_iso = unlist(countryGroupsIso)
+  filter(!is.na(Company))
+
+# Load in OceanNET companies and de-deuplicate from GESAMP companies
+OceanNET_companies <- read.csv(
+  here::here("data/raw-data/external/OceanNETs_D18_oceanbased_CDR_companies/dataset/D1_8_database_oceanbased_companies.csv")) %>%
+  mutate(
+    Company = trimws(gsub("[[:punct:]]", "", Company)),
+    source = "OceanNETs (2020) D1.8 database"
+  )%>%
+  filter(!is.na(Company), !is.na(Lat))%>%
+  select(-c(contains("X"))) %>%
+  filter(!(tolower(Company) %in% tolower(GESAMP_companies$Company)), Company != "Qilibrium")
+
+
+# Join
+mCDRCompanies <- GESAMP_companies %>%
+  bind_rows(OceanNET_companies)
+
+# write to file
+write.csv(mCDRCompanies, file = here::here("data/derived-data/mCDR-companies-dedup.csv"))
+
+## read in the years
+mCDRCompanies <- readxl::read_excel(here::here("data/raw-data/mCDR-companies-linkedin.xlsx")) %>%
+  filter(!is.na(`Company founded on (linkedin)`)) %>%
+  rename(year = `Company founded on (linkedin)`) %>%
+  select(Company, year) %>%
+  left_join(GESAMP_companies %>% select(Company, Type), by="Company") %>%
+  left_join(OceanNET_companies %>% select(Company, Type), by="Company") %>%
+  mutate(
+    Type = ifelse(is.na(Type.x), Type.y, Type.x)
+  ) %>%
+  select(Company, Type, year) %>%
+  mutate(
+    oro_type = case_when(
+      grepl("Upwell|fertilization", Type, ignore.case=TRUE) ~ "CDR-BioPump",
+      grepl("Biomass sinking|Farming|Harvesting|Aquaculture", Type, ignore.case=TRUE) ~ "CDR-Cult",
+      grepl("OAE|Alkalinity|weathering", Type) ~ "CDR-OAE",
+      TRUE~"CDR-Other"
     ),
-    by="country_name") %>%
-  select(country_name, country_iso,component, oro_branch, oro_type, year, variable_name, y) %>%
-  arrange(country_name, year)
-
-ggplot(coastPr, aes(year,y, col=country_name))+
-  geom_line()
-
-```
-
-```{r Built Infr and Tech option 1 - spending on coastal flood defenses}
-
-# Sys.setenv("EXCHANGERATEHOST_ACCESS_KEY"="fa3b238d0d108683c3d22b687badddf5")
-
-# Assign these variables once
-
-country <- "EU"
-inflation_dataframe <- priceR::retrieve_inflation_data(country)
-countries_dataframe <- priceR::show_countries()
-
-# UK: Office of national statistics
-# Units given in 20/21 prices in millions of pounds
-uk <- readxl::read_excel(
-  here::here("data/external/UK_investmentinflooddefences.xlsx"),
-  sheet = "Historical expenditure",
-  skip = 3,
-  trim_ws = T
-) %>%
-  mutate(
-    year = as.numeric(`Financial Year Ending`),
-    y = `Total`*(1e+06), # convert to millions of pounds
-    country_name = "United Kingdom"
+    source = "Startup",
+    year = as.numeric(year)
   ) %>%
-  filter(!is.na(year)) %>%
-  mutate(
-    from_currency = "GBP",
-    to_currency = "EUR",
-    #date = lubridate::ymd(as.numeric(paste(year,0101)))
-    date = as.Date(paste0(year,"-01-01")),
-    y_EUR = priceR::convert_currencies(y, from_currency, to_currency, date),
-    y_EUR_inf = priceR::adjust_for_inflation(
-      y_EUR, 
-      from_date = date, 
-      country = country, 
-      to_date = as.Date("2023-01-01"),
-      inflation_dataframe = inflation_dataframe,
-      countries_dataframe = countries_dataframe)
-  ) %>%
-  select(
-    country_name, year, y, y_EUR, y_EUR_inf
-  )
-
-
-# Germany: https://www.umweltbundesamt.de/en/topics/climate-energy/climate-impacts-adaptation/impacts-of-climate-change/monitoring-report-2019/indicators-of-climate-change-impacts-adaptation/cluster-coastal-marine-protection/km-r-1-investments-in-coastal-protection
-ger <- readxl::read_excel(
-  here::here("data/external/Germany_investmentflooddefences.xlsx"), 
-  sheet = "data"
-) %>%
-  rename(
-    y = GAK # only include german government funding which would respond to national policy
-  ) %>%
-  select(year, y) %>%
-  mutate(
-    year = as.numeric(year),
-    country_name = "Germany"
-  ) %>%
-  filter(!is.na(year)) %>%
-  mutate(
-    y = y*(1e+06), # transform into millions
-    date = paste0(year,"-01-01"),
-    y_EUR = y,
-    y_EUR_inf = priceR::adjust_for_inflation(
-      y_EUR, 
-      from_date = as.Date(date), 
-      country = country, 
-      to_date = as.Date("2023-01-01"),
-      inflation_dataframe = inflation_dataframe,
-      countries_dataframe = countries_dataframe)
-  ) %>%
-  select(
-    country_name, year, y, y_EUR, y_EUR_inf
-  )
-
-
-## France:
-# 'TOTAL' column in table 7-1: Expendature to protect against coastal flooding and erosion (in million euros) of document: Policy-Research-Corporation.--2007.--Overview-and-Assesment-of-CC-in-France
-# --> instead Spending on 'Submersions marines' from Rapport sur la gestion du fonds de prévention des risques naturels majeurs
-fr <- readxl::read_excel(
-  here::here("data/external/France_expendatureAgainstCoastalFlooding.xlsx"), 
-  sheet = "depensesFPRNM",
-  skip = 2
-) %>%
-  select(country_name, year, y) %>%
-  mutate(
-    year = as.numeric(year),
-    y= as.numeric(y)*(1e+06) # transform into millions
-  ) %>%
-  filter(!is.na(year)) %>%
-  mutate(
-    date = paste0(year,"-01-01"),
-    y_EUR = y,
-    y_EUR_inf = priceR::adjust_for_inflation(
-      y_EUR, 
-      from_date = as.Date(date), 
-      country = country, 
-      to_date = as.Date("2023-01-01"),
-      inflation_dataframe = inflation_dataframe,
-      countries_dataframe = countries_dataframe)
-  ) %>%
-  select(
-    country_name, year, y, y_EUR, y_EUR_inf
-  )
-
-
-# # Other french indicators
-# 13.i2;"Nombre de communes faisant l'objet d'un plan de prÃ©vention des risques naturels approuvÃ©";"Number of municipalities covered by an approved natural risk prevention plan"
-
-
-# USA: Army corps of engineers budget history
-# source: CBO's November 2022 report Army Corps of Engineers: Budgetary History and Projections. http://www.cbo.gov/publication/58415
-# also useful document: https://www.cbo.gov/publication/60803
-# Units: Billions of 2022 Dollars
-
-us <- readxl::read_excel(
-  here::here("data/external/US_Army Corps of Engineers Budgetary History and Projections.xlsx"), 
-  sheet = "Figure 2",
-  skip = 8
-) %>%
-  rename(
-    year = `...1`,
-    y = Outlays
-  ) %>%
-  select(year, y) %>%
-  mutate(
-    year = as.numeric(year),
-    country_name = "United States"
-  ) %>%
-  filter(!is.na(year)) %>%
-  mutate(
-    y = y*(1e+09), # transform into billions
-    from_currency = "USD",
-    to_currency = "EUR",
-    date = paste0("2022-01-01"),
-    y_EUR = priceR::convert_currencies(y, from_currency, to_currency, as.Date(date)),
-    y_EUR_inf = priceR::adjust_for_inflation(
-      y_EUR, 
-      from_date = as.Date(date), 
-      country = country, 
-      to_date = as.Date("2023-01-01"),
-      inflation_dataframe = inflation_dataframe,
-      countries_dataframe = countries_dataframe)
-  ) %>%
-  select(
-    country_name, year, y, y_EUR, y_EUR_inf
-  )
-
-cols <- c("country_name","year","y","y_EUR","y_EUR_inf")
-
-coastDefSpend_og <- rbind(
-  uk[,cols], us[,cols], ger[,cols], fr[,cols])%>%
-  left_join(data.frame(
-    country_name = unlist(countryGroups),
-    country_iso = unlist(countryGroupsIso)
-    ),
-    by="country_name")
-
-coastDefSpend <- coastDefSpend_og %>%
-  select(-c(y, y_EUR)) %>%
-  rename(
-    y=y_EUR_inf
-  ) %>%
-  mutate(
-    variable_name = "Coastal protection spending (EUR 2023)",
-    oro_branch = "Societal",
-    oro_type = "Built infrastructure & technology",
-    component = "deployment"
-  ) %>%
-  select(country_name, country_iso,component, oro_branch, oro_type, year, variable_name, y) %>%
-  arrange(country_name, year) %>%
-  filter(
-    2005 <= year & year <= 2020
-  )
+  filter(oro_type != "CDR-Other")
   
-
-## save
-# save(coastDefSpend, coastDefSpend_og, file=here::here("data/derived-data/countryCoastDefenseSpending.RData"))
-load("data/derived-data/countryCoastDefenseSpending.RData")
-
-
-# "country_name"  "country_iso"   "component"     "oro_branch"    "oro_type"      "year"          "variable_name" "y"
-
-ggplot(coastDefSpend, aes(x=year, y=y, col = country_name))+
-  geom_line()+
-  facet_wrap(vars(country_name), scales="free_y")+
-  scale_y_continuous(labels = scales::label_number(accuracy=0.1, scale_cut=scales::cut_short_scale()))+
-  scale_x_continuous(limits=c(2005, 2020))+
-  labs(caption = "France: spending on submersions marines \n(Rapport sur la gestion du fonds de prévention des risques naturels majeurs)\nGermany: investments-in-coastal-protection\nUSA: Army Corps of Engineers: Budgetary History and Projections\nUK: Office of national statistics investment in flood defences")
+# Ocean visions community and www.cdr.fyi/leaderboards can't be scraped because they use private APIs
+# Although the latter a list of suppliers can be found here without metadata
+# https://www.cdr.fyi/api/search
 
 
 
-```
 
-
-
-```{r plot of france spending for contact email}
-ggplot(coastDefSpend %>% filter(country_name == "France"), aes(x=as.Date(paste0(year,"-01-01")), y=y))+
-  geom_col()+ geom_text(aes(label = paste(round(y/(1e+06)),"M")), col="white", vjust=1)+
-  #facet_wrap(vars(country_name), scales="free_y")+
-  scale_y_continuous(labels = scales::label_number(accuracy=0.1, scale_cut=scales::cut_short_scale()), name="Spending on submersions marines (EUR)")+
-  scale_x_date(name = "Year")+
-  labs(caption = "France: spending on submersions marines \n(Rapport sur la gestion du fonds de prévention des risques naturels majeurs)")+
-  theme_minimal()
-```
-
-Can possibly use the Benefit coast ratio of adaptation for weighting? Get data from Lincke and Hinkel 2018 calculate b in Fig 1: % a countries’ coast (coastline segments) having a BCR > 1 under all scenarios considered.
-
-GASPAR data [source](https://www.georisques.gouv.fr/donnees/bases-de-donnees/procedures-administratives-relatives-aux-risques)
-
-```{r France deployment option 2- GASPAR data number of communes covered by PPRL, eval=FALSE}
-## Load data
-# Communes exposed to marine flooding
-risque <- read.delim(
-  here::here("data/external/gaspar_data/risq_gaspar.csv.csv"), sep = ";"
-)%>%
-  filter(lib_risque == "Par submersion marine") %>%
-  select(cod_commune, lib_commune) 
-# PPRNs covering marine submersion
-pprn <- read.delim(
-  here::here("data/external/gaspar_data/pprn_gaspar.csv.csv"), sep = ";"
-)%>%
-  filter(lib_risque == "Par submersion marine") %>%
-  select(cod_nat_pprn, lib_pprn, cod_commune, lib_commune, cod_ppr, dat_approbation, dat_abrog, dat_maj) %>%
-  mutate(dat_approbation = as.Date(dat_approbation),
-         dat_abrog = as.Date(dat_abrog),
-         dat_maj = as.Date(dat_maj)) %>%
-  mutate(
-    dat_end = as.Date(ifelse(is.na(dat_abrog), dat_maj, dat_abrog))
-  ) %>%
-  filter(!is.na(dat_approbation))
-
-
-
-## Format data and calculations
-
-is_time_covered <- function(year, df) {
-  year <- as.Date(paste0(year,"-01-01"))  # Ensure input time is in correct format
-  any(df$dat_approbation <= year & df$dat_end >= year)  # Check if time falls in any interval
-}
-
-is_time_covered(1998, pprn) # test
-
-# For each commune and year, add indicator saying whether the commune was covered
-yearRange <- as.numeric(format(c(min(pprn$dat_approbation, na.rm = T), max(pprn$dat_maj, na.rm = T)), "%Y"))
-years <- seq(yearRange[1], yearRange[2], by=1)
-communeCoveredYear <- expand.grid(risque$cod_commune, years)
-colnames(communeCoveredYear) <- c("cod_commune","year")
-communes <- unique(risque$cod_commune)
-communeCoveredYear$covered_by_pprn <- vector("logical" ,nrow(communeCoveredYear))
-
-
-## Takes ~1 min to run ---------------
-# for(i in 1:nrow(communeCoveredYear)){
-#   communeCoveredYear$covered_by_pprn[i] <- is_time_covered(
-#     communeCoveredYear$year[i], 
-#     pprn[pprn$cod_commune == communeCoveredYear$cod_commune[i],]
-#     )
-# }
-
-# Sum the number of communes covered each year
-communeCoveredYearSum <- communeCoveredYear %>%
-  group_by(year) %>%
+## Combine data sources
+mCDRDeploy <- fieldTrials[,c("oro_type","year","source")] %>%
+  bind_rows(mCDRCompanies[,c("oro_type","year","source")]) %>%
+  group_by(oro_type, year) %>%
   summarise(
-    n_communes_covered = sum(covered_by_pprn)
+    y=n()
   ) %>%
   mutate(
-    prop_communes_covered = n_communes_covered/length(communes)
+    variable_name = "Field trial/startup company (N)",
+    component = "deployment"
   )
 
-# Quickly visualize data
-summary(communeCoveredYearSum)
-with(communeCoveredYearSum, plot(year, n_communes_covered))
-with(communeCoveredYearSum, plot(year, prop_communes_covered))
+ggplot(mCDRDeploy, aes(year, y, fill=oro_type))+
+  geom_col()
 
-
-## Format for deployment data
-# columns: id variables: oro_branch, oro_type, country_name, country_iso, component (publication, policy, deployment), variable_name, response variable: y
-franceCommunePPRNDeploy <- communeCoveredYearSum %>%
-  mutate(
-    country_name = "France",
-    country_iso = "FRA",
-    component = "deployment",
-    oro_branch = "Societal",
-    oro_type = "Built infrastructure & technology",
-    variable_name = paste(c("Number communes at risk for submersion marine with a PPRN (/",length(communes)," total)"), collapse="")
-  ) %>%
-  rename(y=n_communes_covered) %>%
-  select(-prop_communes_covered)
-
-franceCommunePPRNDeploy <- franceCommunePPRNDeploy[,c("country_name", "country_iso",   "component", "oro_branch", "oro_type", "year", "variable_name", "y")]
-
-# save(communeCoveredYearSum,communeCoveredYear, file=here::here("data/derived-data/francePPRNCommuneYear.RData"))
-# save(franceCommunePPRNDeploy,file=here::here("data/derived-data/franceCommunePPRNDeploy.RData"))
 ```
 
 
 
 
 ```{r save all deployment data, eval=FALSE}
-cols <- c("country_name","country_iso","component","oro_branch","oro_type","year","variable_name","y")
+cols <- c("component","oro_type","year","variable_name","y")
 
 allDeployDat <- rbind(
   MreDat[,cols],
   eff[,cols],
+  ccsDat[,cols],
   bc_restoration[,cols],
-  coastPr[,cols],
-  coastDefSpend[,cols]
+  mCDRDeploy[,cols]
 )
 
 ggplot(allDeployDat, aes(year, y, col=oro_type))+
   geom_line()+
-  facet_wrap(oro_type ~ country_name, scales="free")+
-  geom_text(aes(label = str_wrap(variable_name, 25)), x=-Inf, y=Inf, check_overlap = T, guide=FALSE, vjust=1, hjust=0, size=3)
+  facet_wrap(vars(oro_type), scales="free")+
+  geom_text(aes(label = str_wrap(variable_name, 25)), x=-Inf, y=Inf, check_overlap = T, guide=FALSE, vjust=1, hjust=0, size=3)+
+  theme(
+    legend.position = "none"
+  )
 
 # ggsave(here::here("figures/supplemental/deploymentIndicators.pdf"), width = 15, height=12)
 
@@ -1431,32 +537,6 @@ ggplot(allDeployDat, aes(year, y, col=oro_type))+
 
 ```
 
-
-
-```{r save all deployment data v2 with France PPRN, eval=FALSE}
-cols <- c("country_name","country_iso","component","oro_branch","oro_type","year","variable_name","y")
-
-load(file=here::here("data/derived-data/franceCommunePPRNDeploy.RData"))
-
-allDeployDat <- rbind(
-  MreDat[,cols],
-  eff[,cols],
-  bc_restoration[,cols],
-  coastPr[,cols],
-  coastDefSpend[,cols] %>% filter(country_name != "France"),
-  franceCommunePPRNDeploy[,cols]
-  
-)
-
-ggplot(allDeployDat, aes(year, y, col=oro_type))+
-  geom_line()+
-  facet_wrap(oro_type ~ country_name, scales="free")+
-  geom_text(aes(label = str_wrap(variable_name, 25)), x=-Inf, y=Inf, check_overlap = T, guide=FALSE, vjust=1, hjust=0, size=3)
-
-# ggsave(here::here("figures/supplemental/deploymentIndicators_v2.pdf"), width = 15, height=12)
-# save(allDeployDat, file=here::here("data/derived-data/allDeployDat_v2.RData"))
-
-```
 
 
 

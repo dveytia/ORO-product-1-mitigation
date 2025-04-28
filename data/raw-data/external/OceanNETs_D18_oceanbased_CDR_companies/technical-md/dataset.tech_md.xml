@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<dataset xmlns="http://radar-service.eu/schemas/dataset-technical-metadata/v09">
+    <retentionPeriod>0</retentionPeriod>
+    <archiveDate>2022-08-31T21:38:23.305</archiveDate>
+    <archiveCreator>479e45c07cfd3d4e6c161601f3d27cb5</archiveCreator>
+    <responsibleEmail>wilfried.rickels@ifw-kiel.de</responsibleEmail>
+    <numberOfPendingNotificationMailsSent>0</numberOfPendingNotificationMailsSent>
+    <size>5467</size>
+    <access>public</access>
+    <blocked>false</blocked>
+    <schema>
+        <key>RDDM</key>
+        <version>09</version>
+    </schema>
+</dataset>

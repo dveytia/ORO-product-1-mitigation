@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ns2:radarDataset xmlns="http://radar-service.eu/schemas/descriptive/radar/v09/radar-elements" xmlns:ns2="http://radar-service.eu/schemas/descriptive/radar/v09/radar-dataset">
+    <identifier identifierType="DOI">10.22000/734</identifier>
+    <creators>
+        <creator>
+            <creatorName>Rickels, Wilfried</creatorName>
+            <givenName>Wilfried</givenName>
+            <familyName>Rickels</familyName>
+        </creator>
+    </creators>
+    <title>OceanNETs_D18_oceanbased_CDR_companies</title>
+    <publishers>
+        <publisher>Rickels, Wilfried</publisher>
+    </publishers>
+    <productionYear>2022</productionYear>
+    <publicationYear>2022</publicationYear>
+    <subjectAreas>
+        <subjectArea>
+            <controlledSubjectAreaName>Economics</controlledSubjectAreaName>
+        </subjectArea>
+    </subjectAreas>
+    <resource resourceType="Collection"></resource>
+    <rights>
+        <controlledRights>CC BY-NC 4.0 Attribution-NonCommercial</controlledRights>
+    </rights>
+    <rightsHolders>
+        <rightsHolder>Rickels, Wilfried</rightsHolder>
+    </rightsHolders>
+</ns2:radarDataset>
