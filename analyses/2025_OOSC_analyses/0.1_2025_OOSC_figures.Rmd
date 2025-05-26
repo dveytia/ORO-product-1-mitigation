@@ -200,11 +200,11 @@ pubs <- pubs %>%
 
 ## N policy documents
 
-```{r read in policy documents}
+```{r read in legislation documents}
 
 ## Read in and format policy matches
 
-pols <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
+legDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
   rename(country_name = Country_short, year=Year, oro_type = oroType) %>%
   filter(1975 < year,
          Binding.legislation == "True", 
@@ -230,8 +230,8 @@ pols <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_
   group_by(oro_type, year) %>%
   summarise(y = n_distinct(search_id)) %>%
   mutate(
-    component = "policy",
-    variable_name = "Legislation documents (N)"
+    component = "legislation",
+    variable_name = "Legislation (N)"
   )
 
 
@@ -239,16 +239,68 @@ pols <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_
 
 ## quick plot
   
-pol_stackedBP <- ggplot(pols, aes(x=year, y=y, fill=oro_type))+
+pol_stackedBP <- ggplot(legDat, aes(x=year, y=y, fill=oro_type))+
   geom_col(position="stack")+
   scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level)+
   theme_minimal()+
   theme(legend.position = "bottom")
 pol_stackedBP
-# save(pols, file = here::here("data", "derived-data", "n_policy_docs.RData"))
+
+## save
+save(legDat, file = here::here("data", "derived-data", "n_legislation_docs.RData"))
 
 ```
 
+```{r read in non-binding policy documents}
+
+## Read in and format policy matches
+
+polDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
+  rename(country_name = Country_short, year=Year, oro_type = oroType) %>%
+  filter(1975 < year,
+         Binding.legislation == "False", 
+         National.level == "True"
+         ) %>%
+  mutate(
+    oro_type = case_when(
+      oro_type == "M_MRE_general" ~ "MRE-Located", ## Note to fix this later
+      oro_type == "M_MRE_ocean" ~ "MRE-Ocean",
+      oro_type == "M_MRE_located" ~ "MRE-Located",
+      oro_type == "M_MRE_bio" ~ "MRE-Bio",
+      oro_type == "M_Incr_eff" ~ "Efficiency",
+      oro_type == "M_CCS" ~ "CCS",
+      oro_type == "M_CDR_bc" ~ "CDR-BC",
+      oro_type == "M_CDR_oae" ~ "CDR-OAE",
+      oro_type == "M_CDR_biopump" ~ "CDR-BioPump",
+      oro_type == "M_CDR_cult" ~ "CDR-Cult",
+     
+      TRUE ~ "Other"
+    )) %>%
+  filter(oro_type != "Other") %>%
+  # Tabulate all documents
+  group_by(oro_type, year) %>%
+  summarise(y = n_distinct(search_id)) %>%
+  mutate(
+    component = "non-binding policy",
+    variable_name = "Non-binding policy (N)"
+  )
+
+
+
+
+## quick plot
+  
+pol_stackedBP <- ggplot(polDat, aes(x=year, y=y, fill=oro_type))+
+  geom_col(position="stack")+
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level)+
+  theme_minimal()+
+  theme(legend.position = "bottom")
+pol_stackedBP
+
+## save
+save(polDat, file = here::here("data", "derived-data", "n_nonBindPolicy_docs.RData"))
+
+```
 
 
 
@@ -555,17 +607,22 @@ allDeployDat_scale <- allDeployDat %>%
 
 ## plot all together
 
-allComponentDat <- pubs %>%
-  bind_rows(pols) %>%
+allComponentDat_scale <- pubs %>%
+  bind_rows(polDat) %>%
+  bind_rows(legDat) %>%
   bind_rows(allDeployDat_scale) %>%
   mutate(
     component = factor(component, 
-                       levels = c("publications","policy","deployment"), 
-                       labels = c("Academic\n(N publications)", "Legislation\n(N documents)","Action\n(scaled metric)"))
+                       levels = c("publications","non-binding policy","legislation","deployment"), 
+                       labels = c("Academic\n(N publications)", 
+                                  "Non-binding policy\n(N documents)", 
+                                  "Legislation\n(N documents)",
+                                  "Action\n(scaled metric)"))
   )
 
 
-allComponentAlluvial <- ggplot(allComponentDat %>% filter(1980 <= year, year <= 2022), aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type))+
+
+allComponentAlluvial <- ggplot(allComponentDat_scale %>% filter(1980 <= year, year <= 2022), aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type))+
   # geom_alluvium(alpha = 0.8, decreasing=FALSE)+
   geom_alluvium(alpha = 0.8, curve_type = "sigmoid", decreasing=FALSE) +
   labs(y="",x="Year")+
@@ -582,11 +639,257 @@ allComponentAlluvial <- ggplot(allComponentDat %>% filter(1980 <= year, year <= 
     )
 
 
+## try on log scale?
+allComponentAlluvial_log <- ggplot(allComponentDat_scale %>% 
+                                     mutate(y=log(y)) %>% 
+                                     filter(1990 <= year, year <= 2022) %>%
+                                     na.omit() %>% 
+                                     mutate(
+                                       y= cut(y,
+                                              breaks = seq(0,8, by = 0.1), 
+                                              labels = seq(0.1,8, by = 0.1)
+                                              ) %>% as.numeric()
+                                     ), 
+                                   aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type))+
+  # geom_alluvium(alpha = 0.8, decreasing=FALSE)+
+  geom_alluvium(alpha = 0.8, curve_type = "sigmoid", decreasing=FALSE) +
+  labs(y="",x="Year", caption = "y axis on log scale")+
+  facet_grid(component~., scales = "free_y", switch="y")+
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  scale_colour_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  # scale_x_continuous(limits = c(1980,2022))+
+  # guides(color = guide_legend(nrow = 3), fill = guide_legend(nrow = 3))+
+  guides(color = guide_legend(ncol = 1), fill = guide_legend(ncol = 1))+
+  theme_bw()+
+  theme(
+    legend.position = "right", 
+    strip.placement = "outside",
+    legend.title = element_blank()
+    )
+
+
 ggsave(
   plot = allComponentAlluvial, 
   filename = here::here("figures/2025-06-02_OOSC/allComponentAlluvial.png"),
   width=7, height=6, units="in", dpi = 600
     )
+
+
+ggsave(
+  plot = allComponentAlluvial_log, 
+  filename = here::here("figures/2025-06-02_OOSC/allComponentAlluvial_log.png"),
+  width=7, height=6, units="in", dpi = 600
+    )
 ```
+
+# Analyses
+
+## SEM
+
+https://stats.oarc.ucla.edu/r/seminars/rsem/
+
+Maybe can't resolve at the ORO level and need to pool
+
+```{r explore SEM}
+
+library(vars)
+library(lavaan)
+library(semPlot)
+library(tidyr)
+
+lag_ap <- c(1,2)
+lag_pl <- c(1)
+lag_la <- c(1)
+lag_ap <- c(1)
+lags_combinations <- expand.grid(lag_ap, lag_pl, lag_la,lag_ap)
+year_lim <- c(2000, 2022)
+
+
+# Format data, and take log -- 
+allComponentDat_model <- pubs %>%
+  bind_rows(polDat) %>%
+  bind_rows(legDat) %>%
+  bind_rows(allDeployDat_scale) %>%
+  mutate(
+    component = replace(component, component == "non-binding policy", "policy"),
+    # y = scale(y, center=TRUE, scale=TRUE)
+  ) %>%
+  filter(year_lim[1] <= year & year <= year_lim[2])
+
+ggplot(allComponentDat_model, aes(x=year, y=y, fill = oro_type))+
+  geom_col()+
+  facet_wrap(component ~., scales = "free_y")
+
+# Split by oro type
+oro_groups <- split(allComponentDat_model, allComponentDat_model$oro_type)
+
+# Function to fit model
+
+# variables c("publications","non-binding policy","legislation","deployment")
+
+model <- '
+    # All directional hypotheses
+    
+    policy_lag ~ 1 + publications
+    legislation_lag ~ 1+ policy_lag 
+    action_lag ~ 1 + legislation_lag
+    publications_lag ~ 1+action_lag
+  '
+
+
+
+analyze_group <- function(df_group, oro_label) {
+  
+  # For testing
+  df_group <- oro_groups[[1]]
+  oro_label <- names(oro_groups)[1]
+  
+  # scale?
+  df_group <- df_group %>%
+    dplyr::select(year, component, y) %>%
+    group_by(component) %>%
+    mutate(y = scale(y, center=TRUE))
+  ggplot(df_group, aes(year, y))+ geom_col()+facet_wrap(component ~., scales="free_y")
+  
+  # Reshape to wide format, replace NA with 0
+  df_wide <- df_group %>%
+    pivot_wider(names_from = component, values_from = y) %>%
+    arrange(year) %>%
+    mutate(across(-c(year), ~ replace_na(., 0))) 
+  
+  # Calculate lagged variables
+  lag_ap <- c(1,2) # academic to policy
+  lag_pl <- c(1) # policy to legislation
+  lag_ld <- c(1) # legislation to deployment
+  lag_da <- c(1) # deployment to academic
+  lags_combinations <- expand.grid(lag_ap, lag_pl, lag_ld,lag_da)
+  colnames(lags_combinations) <- c("lag_ap", "lag_pl", "lag_ld","lag_da")
+  lags <- lags_combinations[1,] # for testing
+  
+  
+  model <- '
+    policy_lag ~ 1 + publications
+    legislation_lag ~ 1+ policy_lag 
+    deployment_lag ~ 1 + legislation_lag
+    publications_lag ~ 1+deployment_lag
+  '
+  
+  df_wide <- df_wide %>%
+    mutate(
+      policy_lag = lag(policy, sum(lags[1])),
+      legislation_lag = lag(legislation, sum(lags[1:2])),
+      deployment_lag = lag(deployment, sum(lags[1:3])),
+      publications_lag = lag(publications, sum(lags[1:4]))
+    ) %>%
+    dplyr::select(year, publications, contains("lag"))%>%
+    na.omit()
+  
+
+  
+  # Fit a simple SEM: test all directions
+  fit <- sem(model, data = df_wide, missing = "ML")
+
+  # Visualize SEM results
+  semPlot::semPaths(fit, whatLabels = "est", layout = "circle")
+
+  # Return results for further processing
+  list(change_points = change_points, ccf_matrix = ccf_matrix, sem_fit = fit)
+}
+
+# Run analysis for each group
+results <- lapply(names(oro_groups), function(name) {
+  analyze_group(oro_groups[[name]], name)
+})
+names(results) <- names(oro_groups)
+
+```
+
+
+```{r}
+# Load required packages
+
+library(changepoint)
+library(lmtest)
+library(vars)
+library(lavaan)
+library(semPlot)
+library(tidyr)
+
+# Load the data
+data <- read.csv(here::here("data/derived-data/mitigationDeployDatTable.csv"))
+
+# Ensure time is in correct format
+data$time <- as.numeric(as.Date(paste0(data$year, "-01-01")))
+
+# Split by 'oro_type'
+oro_groups <- split(data, data$oro_type)
+
+# Function to perform analysis per oro_type
+analyze_group <- function(df_group, oro_label) {
+  # Reshape to wide format
+  df_wide <- df_group %>%
+    select(time, component, y) %>%
+    pivot_wider(names_from = component, values_from = y) %>%
+    arrange(time)
+
+  # --- Change point detection for each component ---
+  change_points <- lapply(df_wide[-1], function(series) {
+    tryCatch({
+      cpt.meanvar(series, method = "PELT", penalty = "SIC")$cpts
+    }, error = function(e) NA)
+  })
+
+  print(paste("Change points for", oro_label))
+  print(change_points)
+
+  # --- Cross-correlation analysis ---
+  # Create time series
+  ts_data <- ts(df_wide[-1], start = min(df_wide$time), frequency = 1)
+  ccf_matrix <- list()
+
+  comps <- colnames(ts_data)
+  for (i in 1:length(comps)) {
+    for (j in 1:length(comps)) {
+      if (i != j) {
+        ccf_res <- ccf(ts_data[, i], ts_data[, j], plot = FALSE)
+        max_corr <- max(abs(ccf_res$acf))
+        lag_at_max <- ccf_res$lag[which.max(abs(ccf_res$acf))]
+        ccf_matrix[[paste(comps[i], comps[j], sep = "_")]] <- c(max_corr, lag_at_max)
+      }
+    }
+  }
+  print(paste("Cross-correlation results for", oro_label))
+  print(ccf_matrix)
+
+  # --- Structural Equation Modeling (SEM) ---
+  # Fit a simple SEM: test all directions
+  sem_data <- na.omit(df_wide[-1])  # exclude time, and drop NAs
+  model <- '
+    # All directional hypotheses
+    publications ~ policy + deployment
+    policy ~ publications + deployment
+    deployment ~ publications + policy
+  '
+  fit <- sem(model, data = sem_data, missing = "ML")
+
+  # Visualize SEM results
+  semPlot::semPaths(fit, whatLabels = "est", layout = "circle", title = paste("SEM for", oro_label))
+
+  # Return results for further processing
+  list(change_points = change_points, ccf_matrix = ccf_matrix, sem_fit = fit)
+}
+
+# Run analysis for each group
+results <- lapply(names(oro_groups), function(name) {
+  analyze_group(oro_groups[[name]], name)
+})
+names(results) <- names(oro_groups)
+
+
+```
+
+
+
+
 
 

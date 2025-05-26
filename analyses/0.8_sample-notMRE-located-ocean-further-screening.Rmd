@@ -1,0 +1,138 @@
+---
+title: "0.8_sample-non-MRE-located-ocean-further-screening"
+author: "Devi Veytia"
+date: "2025-05-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+The problem was that in the oro type screening, not enough of the random sample had instances of other ORO types that were NOT MRE located or ocean. So fit a multilabel classifier for MRE located, MRE ocean or other, and then ran predictions for all unseen mitigation oro branch. I will sample from these for further screening/coding and treat the sample as random because I will only use these articles for selection and prediction.
+
+# Set up
+
+```{r set up libraries}
+## Load libraries
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(RSQLite)
+library(ggplot2)
+library(tidyverse)
+
+source(here::here("R/bool_detect.R"))
+source(here::here("R/write_ris_batches.R"))
+```
+
+```{r set the seed}
+addTaskCallback(function(...) {set.seed(123);TRUE})
+```
+
+
+```{r Set up inputs to determine how many articles to sample}
+setSize <- 200 # write the files in batches to not overwhelm sysrev
+#nRecsTotal = 800 # Max no of articles to sample in total per label
+nRecsTotal = 2500 # total target number of records to screen
+```
+
+# Sample
+
+```{r collect all potential mitigation ORO references}
+
+# Read in all mitigation ORO references 
+
+## connect to database
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                            here::here("data","sqlite-databases","product1.sqlite"),
+                            create=FALSE)
+
+
+# Collect table of unique references metadata
+uniquerefs <- tbl(p1_db, "uniquerefs") %>%
+  select(analysis_id, title, abstract, keywords) %>%
+  collect()
+
+# identify references relevant to mitigation
+pred_OROmitigation <- tbl(p1_db, "pred_oro_any_mitigation") %>%  # mitigation 
+  select(analysis_id, `oro_any.M_Renewables - mean_prediction`, `oro_any.M_Increase_efficiency - mean_prediction`,
+         `oro_any.M_CO2_removal_or_storage - mean_prediction`) %>%
+  collect()
+
+# Filter to articles relevant for at least 1 mitigation ORO
+pred_OROmitigation <- pred_OROmitigation %>%
+  mutate(n_OROs = rowSums(.[2:4] > 0.5)) %>% 
+  filter(1 <= n_OROs) %>%
+  left_join(uniquerefs, by = "analysis_id") %>%
+  filter(!is.na(abstract)) %>%
+  rename(id = analysis_id) 
+  
+
+# Disconnect from database
+dbDisconnect(p1_db)
+
+
+# Also read in updated references
+uniquerefs_update <- read_delim(
+  here::here("data/raw-data/unique_references_UPDATE_13-05-2025.txt"), delim = "\t"
+)
+uniquerefs_update <- uniquerefs_update %>%
+  select(analysis_id, title, abstract, keywords)
+
+
+# Read in predictions of MRE-located, MRE-ocean or other
+# Filter to NOT MRE located or ocean
+mrePred <- read.csv(
+  here::here("outputs/coded-label-predictions/oro_type.MRE_v2_MreLO_predictions.csv")) 
+
+
+mrePred %>%
+  summarise(
+    n_MreLocated = sum(0.5 <= `oro_type.MRE.Located...mean_prediction`),
+    n_MreOcean = sum(0.5 <= `oro_type.MRE.Ocean...mean_prediction`),
+    n_MreAbsent = sum(0.5 <= `oro_type.MRE.Absent...mean_prediction`)
+  )
+#   n_MreLocated n_MreOcean n_MreAbsent
+# 1        17021      13776       29934
+
+mreAbsent <- mrePred %>%
+  filter(`oro_type.MRE.Located...mean_prediction` < 0.5 &
+           `oro_type.MRE.Ocean...mean_prediction` < 0.5 &
+           0.5 <= `oro_type.MRE.Absent...mean_prediction`)
+
+nrow(mreAbsent)  # 29927 (removed articles predicted relevant for multiple)
+
+
+## Sample these articles and write to .ris files
+
+randids <- sample(mreAbsent$id, round(nRecsTotal))
+
+df <- pred_OROmitigation %>%
+  filter(id %in% randids) %>%
+  rename(analysis_id = id) %>%
+  select(analysis_id, title, abstract, keywords) %>%
+  bind_rows(
+    uniquerefs_update %>%
+      filter(analysis_id %in% randids)
+  )
+nrow(df)
+
+write_ris_batches(df = df %>% select(title, abstract, keywords), 
+                  batchSize = setSize, 
+                  writeDir = here::here("data/derived-data/0.8_sample-notMRE-screen-and-code"), 
+                  fileNamePrefix = "random-notMRE_")
+
+sampled_articles <- df %>% 
+  select(analysis_id, title, abstract, keywords) %>% 
+  mutate(sample_method = "random_notMRE") 
+
+
+# ## Write sampled articles to sqlite
+# p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+#                             here::here("data","sqlite-databases","product1.sqlite"),
+#                             create=FALSE)
+# dbWriteTable(p1_db, "0.8_sampled-articles_notMRE", sampled_articles, overwrite = FALSE, append = FALSE)
+# dbDisconnect(p1_db)
+```
