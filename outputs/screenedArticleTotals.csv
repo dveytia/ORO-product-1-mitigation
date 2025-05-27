@@ -1,0 +1,31 @@
+"","random_sample","oro_type","n_include","n_exclude"
+"1","non-random","CCS",75,648
+"2","non-random","CDR-BC",80,643
+"3","non-random","CDR-BioPump",75,648
+"4","non-random","CDR-Cult",44,679
+"5","non-random","CDR-OAE",81,642
+"6","non-random","CDR-Other",9,714
+"7","non-random","Efficiency",25,698
+"8","non-random","MRE-Bio",126,597
+"9","non-random","MRE-Located",19,704
+"10","non-random","MRE-Ocean",28,695
+"11","random","CCS",27,658
+"12","random","CDR-BC",37,648
+"13","random","CDR-BioPump",8,677
+"14","random","CDR-Cult",0,685
+"15","random","CDR-OAE",3,682
+"16","random","CDR-Other",1,684
+"17","random","Efficiency",42,643
+"18","random","MRE-Bio",7,678
+"19","random","MRE-Located",158,527
+"20","random","MRE-Ocean",157,528
+"21","random (not MRE)","CCS",52,384
+"22","random (not MRE)","CDR-BC",57,379
+"23","random (not MRE)","CDR-BioPump",30,406
+"24","random (not MRE)","CDR-Cult",9,427
+"25","random (not MRE)","CDR-OAE",29,407
+"26","random (not MRE)","CDR-Other",7,429
+"27","random (not MRE)","Efficiency",48,388
+"28","random (not MRE)","MRE-Bio",37,399
+"29","random (not MRE)","MRE-Located",18,418
+"30","random (not MRE)","MRE-Ocean",17,419
