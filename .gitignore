@@ -9,6 +9,7 @@ data/raw-data/unique_references_UPDATE_13-05-2025.txt
 data/data_map.RData
 data/derived-data/screen-article-answers-formatted/
 outputs/coded-label-predictions/*.csv
+outputs/coded-label-predictions/ORO_sys_map_update/*
 outputs/coded-label-predictions/oro_type_v1_predictions.csv
 
 # key information
