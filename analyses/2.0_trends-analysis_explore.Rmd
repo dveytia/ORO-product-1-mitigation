@@ -267,6 +267,13 @@ rm(oroDat, nodes, edges, TE_out, edgesResults)
 
 ## Synthesizing results: At the oro level
 
+```{r load TE results}
+
+# TE_results, TE_results_summary
+load(here::here("data/derived-data/TE_results.RData"))
+
+```
+
 1. Build a Directed Causal Graph per oro_type
 🔧 Description:
 Convert each oro_type group into a directed graph:
@@ -278,7 +285,7 @@ Directed Edges = significant NodeX → NodeY pairs with TE_pval < α (e.g. 0.05)
 Edge weight = TE_ratio (strength of causality)
 
 This structure allows visual exploration, network metrics (e.g. in-degree), and cross-type comparisons.
-```{r Directed Causal Graph of TE results}
+```{r plot Directed Causal Graph of TE results for each oro}
 
 require(igraph)
 
@@ -310,6 +317,8 @@ par(mfrow=c(1,1))
 
 
 2. Normalize and Aggregate Causal Strengths Across oro_types
+
+
 🔧 Description:
 Aggregate the TE results across oro_types to build a meta-causal graph:
 
@@ -331,10 +340,18 @@ Visualize the aggregated meta-network where:
 * Edge transparency = consistency (e.g. normalized N significant).
 * Node size = degree or centrality.
 
+ALSO: Identify subsystems at the meta level (Node colour)
+🔧 Description:
+Use community detection or hierarchical clustering to identify subsystems (e.g., policy ↔ public interest loop).
+
+🧠 Why:
+Find recurring causal motifs or domain-specific differences.
+
+
 ```{r meta network aggregated across oro types}
 
 meta_links <- TE_results %>%
-  filter(TE_pval < 0.05, !is.na(TE_ratio), TE_ratio > 0) %>%
+  filter(TE_pval < 0.05,TE_XCauseY==TRUE, !is.na(TE_ratio), TE_ratio > 0) %>%
   group_by(NodeX, NodeY) %>%
   summarise(
     n_sig = n(),
@@ -347,6 +364,9 @@ meta_links <- TE_results %>%
   arrange(desc(relative_nsig), desc(avg_ratio)) 
 
 
+# Make meta graph
+meta_graph <- graph_from_data_frame(meta_links, directed = TRUE)
+
 # Calculate clusters
 clusters <- cluster_walktrap(meta_graph)
 
@@ -355,8 +375,6 @@ clusters <- cluster_walktrap(meta_graph)
 # arrow width ~ average TE_ratio
 # arrow colour ~ agreement
 # node colour ~ cluster
-
-meta_graph <- graph_from_data_frame(meta_links, directed = TRUE)
 E(meta_graph)$weight <- meta_links$avg_ratio
 E(meta_graph)$color <- scales::alpha("black", meta_links$relative_nsig)
 
@@ -397,22 +415,6 @@ sort(betweenness(meta_graph), decreasing=TRUE)
 
 
 
-Identify subsystems at the meta level
-🔧 Description:
-Use community detection or hierarchical clustering to identify subsystems (e.g., policy ↔ public interest loop).
-
-🧠 Why:
-Find recurring causal motifs or domain-specific differences.
-
-```{r Cluster nodes and plot the meta network}
-clusters <- cluster_walktrap(meta_graph)
-
-
-svg(file = here::here("figures/supplemental/meta_TE_network_diagraph.svg"),width = 8, height = 8)
-plot(meta_graph, vertex.color = clusters$membership)
-dev.off()
-
-```
 
 
 Cluster or compare the causal network structure across oro_type groups to identify:
@@ -427,7 +429,7 @@ Method:
 * Compute distance or similarity between oro_type graphs.
 * Cluster the oro_types.
 * Visualize with dendrograms or MDS plots.
-```{r}
+```{r compare networks by oro cluster and plot dendogram and pheatmap separately}
 
 ## Adjacency matrix
 
@@ -519,7 +521,7 @@ dev.off()
 
 
 Visualize the networks of each oro type cluster
-```{r Visualize the networks of each oro type cluster}
+```{r Get the dendographs corresponding to each oro type cluster}
 # Cut into 5 clusters
 n_clusters <- 5
 oro_type_clusters <- cutree(hc, k = n_clusters)
@@ -578,7 +580,7 @@ for (k in 1:n_clusters) {
 
 
 
-
+## Rough plotting routine -- better one in next chunk
 
 require(grid)
 require(gridExtra)
@@ -622,7 +624,7 @@ gridExtra::grid.arrange(grobs = plots, ncol = 2)
 dev.off()
 ```
 
-```{r cluster level networsk as ggplot}
+```{r plot cluster level networks as ggplot plotted with dendogram}
 library(ggraph)
 library(tidygraph)
 library(ggplot2)
@@ -702,6 +704,132 @@ final_plot <- dend_plot / networks_row + plot_layout(heights = c(1, 3))
 ggsave(filename=here::here("figures/supplemental/cluster_networks_aligned.pdf"), final_plot, width = 20, height = 8)
 
 ```
+
+
+
+```{r group oro networks conceptually and plot combined networks as ggplot plotted with dendogram}
+library(ggraph)
+library(tidygraph)
+library(ggplot2)
+
+
+## Get diagraph objects for each defined cluster
+# Create a data.frame for lookup
+concept_cluster_df <- data.frame(
+  oro_type = c(
+    "CCS","CDR-General","CDR-BC","CDR-BioPump","CDR-OAE","Efficiency","MRE-Bio","MRE-Located", "MRE-Ocean","MRE-General"
+  ),
+  cluster = c(1,rep(2,4),3,rep(4,4))
+)
+
+n_clusters <- length(unique(concept_cluster_df$cluster))
+
+# List to hold one meta-graph per cluster
+concept_meta_graphs <- vector("list", n_clusters)
+concept_cluster_names <- vector("list", n_clusters)
+
+for (k in 1:n_clusters) {
+  # Get oro_types in this cluster
+  types_in_cluster <- concept_cluster_df %>%
+    filter(cluster == k) %>%
+    pull(oro_type)
+  
+  # Filter TE results for these oro_types and significant edges
+  cluster_te <- TE_results %>%
+    filter(oro_type %in% types_in_cluster, 
+           TE_pval < 0.05,
+           !is.na(TE_ratio),
+           0 < TE_ratio
+           )
+  
+  # Aggregate TE_ratio per NodeX → NodeY pair
+  edge_summary <- cluster_te %>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      n_sig = n(),
+      avg_ratio = mean(TE_ratio, na.rm = TRUE),
+      .groups = 'drop'
+    )%>%
+    mutate(
+      relative_nsig = n_sig / max(n_sig)
+    )
+  
+  # Build igraph object
+  g <- graph_from_data_frame(edge_summary, directed = TRUE)
+  
+  # Set edge weights and labels
+  E(g)$weight <- edge_summary$avg_ratio
+  E(g)$width <- log1p(E(g)$weight) * 1.5
+  E(g)$color <- scales::alpha("black", edge_summary$relative_nsig)
+  
+  concept_meta_graphs[[k]] <- g
+  concept_cluster_names[[k]] <- paste(types_in_cluster, collapse = ", ")
+}
+
+
+
+
+
+
+## Plot the networks of the oro types
+
+
+nodeTextSize <- 3
+titleSize <- 10
+
+nodeColPal <- c(
+  "publications"="#377eb8",
+  "policy"="#984ea3",
+  "legislation"="#984ea3",
+  "public interest"="#ff7f00",
+  "public interest weighted"="#ff7f00",
+  "public support"="#ff7f00",
+  "deployment"="#e41a1c"
+)
+
+# Convert network to ggplot
+plot_ggraph_network <- function(g, cluster_id, cluster_label) {
+  g_tidy <- as_tbl_graph(g)
+  
+  ggraph(g_tidy, layout = "circle") +  # You can try "kk" or "circle" or "fr" for spacing
+    geom_edge_link(aes(width = 1/log1p(weight), alpha = relative_nsig),
+                   arrow = arrow(length = unit(5, 'mm')),
+                   color = "black", show.legend = FALSE) +
+    geom_node_point(size = 6, aes(color = name)) +
+    scale_color_manual(values = nodeColPal, guide="none")+
+    geom_node_label(aes(label = name), repel = TRUE, #nudge_x=0.1, nudge_y = 0.1
+                   size = nodeTextSize, alpha=0.8
+                   ) +
+    labs(title = paste(cluster_label)) +
+    theme_void() +
+    theme(
+      plot.title = element_text(size = titleSize, hjust = 0.5),
+      plot.margin = unit(c(5,5,5,5), units = "mm")
+      )
+}
+
+cluster_order <- 1:n_clusters
+concept_ggraph_plots <- lapply(cluster_order, function(k) {
+  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names[[k]])
+})
+
+
+
+
+library(patchwork)
+
+# Arrange the ggraph plots horizontally according to cluster number
+networks_row <- wrap_plots(concept_ggraph_plots, nrow = 2)
+
+# Combine vertically with the dendrogram
+final_plot <- dend_plot / networks_row + plot_layout(heights = c(1, 3))
+
+# Show or save
+
+ggsave(filename=here::here("figures/supplemental/conceptual_cluster_networks.pdf"), networks_row, width = 10, height = 8)
+
+```
+
 
 
 For clusters 3, 4 and 1, where there are more complicated interactions with deployment, what are the impacts of increasing public interest, publications or policy/legislation on deployment?
@@ -899,10 +1027,12 @@ nSims <- 5000
 source(here::here("R/impact.barplot.myMod"))
 source(here::here("R/extend.vector"))
 
+addTaskCallback(function(...) {set.seed(123);TRUE})
+
 # Format data
 
 oroTypes <- unique(allComponentDat_model$oro_type)
-results_df <- data.frame()
+qp_oro_results_df <- data.frame()
 
 
 # maybe instead of by oro type, make edge weight proportional to agreement/consensus...
@@ -959,7 +1089,7 @@ for (oro in oroTypes) {
     temp$oro_type <- oro
     temp$Press_perturb <- node
     
-    results_df <- results_df %>% bind_rows(temp)
+    qp_oro_results_df <- qp_oro_results_df %>% bind_rows(temp)
     
   }
 
@@ -967,7 +1097,7 @@ for (oro in oroTypes) {
 }
 
 
-results_df %>% 
+qp_oro_results_df %>% 
   group_by(Press_perturb) %>%
   summarise(
     avg_pos = mean(Positive, na.rm=T)
@@ -982,6 +1112,181 @@ results_df %>%
 # 6 publications                75 
 
 
+# Plot results
+# For each ORO type
+
+ggplot(qp_oro_results_df, 
+       aes(x=Press_perturb, y=oro_type, fill = Positive))+
+  geom_tile()+
+  scale_fill_steps(name = stringr::str_wrap("Positive effect on deployment (% sims)", width=25), breaks = c(50,100), labels = c("0","100"))+
+  labs(y="ORO type",x="Press perturbation")+
+  theme_bw()+
+  theme(
+    legend.position = "bottom",
+    axis.text.x=element_text(angle=45, hjust=1)
+  )
+
+
+ggsave(
+  here::here("figures/supplemental/qp_oro-level_heatmap.pdf"),
+  width=5, height=4, units="in"
+)
+```
+
+
+But from the conceptual cluster networks, only CDR and MRE groups have deployment in the network. SO look at these clusters
+```{r build qualitative network model for CDR and MRE conceptual clusters}
+# remotes::install_github("SWotherspoon/QPress")
+library(QPress)
+library(reshape2)
+nSims <- 5000
+
+source(here::here("R/impact.barplot.myMod"))
+source(here::here("R/extend.vector"))
+source(here::here("R/my.QPress.R"))
+
+addTaskCallback(function(...) {set.seed(123);TRUE})
+
+# Format data
+weightSimulation = FALSE
+uncertainThreshold = 1 # the threshold of agreement below which the edge is sample with a probability weight of 0.5
+oroTypes <- unique(allComponentDat_model$oro_type)
+qp_concept_cluster_results_df <- data.frame()
+
+# Create a data.frame for lookup
+concept_cluster_df <- data.frame(
+  oro_type = c(
+    "CCS","CDR-General","CDR-BC","CDR-BioPump","CDR-OAE","Efficiency","MRE-Bio","MRE-Located", "MRE-Ocean","MRE-General"
+  ),
+  cluster = c(1,rep(2,4),3,rep(4,4))
+)
+
+n_clusters <- length(unique(concept_cluster_df$cluster))
+
+# List to hold one meta-graph per cluster
+concept_meta_graphs <- vector("list", n_clusters)
+concept_cluster_names <- vector("list", n_clusters)
+
+
+
+
+# maybe instead of by oro type, make edge weight proportional to agreement/consensus...
+# only simulate if deployment is present
+for (k in 1:n_clusters) {
+  # Get oro_types in this cluster
+  types_in_cluster <- concept_cluster_df %>%
+    filter(cluster == k) %>%
+    pull(oro_type)
+  
+  
+  
+  sig_te_edges <- TE_results %>%
+    filter(TE_pval <= 0.05, TE_XCauseY == TRUE,!is.na(TE_ratio), oro_type %in% types_in_cluster) %>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      n_sig = n(),
+      .groups = 'drop'
+    )%>%
+    mutate(
+      Probability = n_sig / max(n_sig),
+      Group = ifelse(uncertainThreshold <= Probability,0,1)
+    ) %>%
+    arrange(desc(Probability)) %>%
+    select(From=NodeX, To=NodeY, Group, Probability) %>%
+    mutate(
+      Type = "P"
+    )
+  
+  
+  sig_nodes <- as.character(unique(c(sig_te_edges$From, sig_te_edges$To)))
+  if(length(sig_nodes)<1){
+    next
+  }
+  if(!("deployment" %in% sig_nodes)){
+    next
+  }
+  
+  sig_te_edges <- sig_te_edges %>%
+    mutate(
+      From = factor(From, levels = sig_nodes),
+      To = factor(To, levels=sig_nodes),
+      Type = factor(Type, levels = c("N","P","U","Z")),
+      # Group = factor(Group)
+    )
+  sig_te_edges$Pair <- 1:nrow(sig_te_edges)
+  
+  allEdgesLabels <- edge.labels(sig_te_edges) 
+  
+  # Mod <- retain.groups(sig_te_edges, groups=0) # all certain interactions
+  Mod <- enforce.limitation(sig_te_edges%>% select(-Probability)) # enforce self-limiting effect
+  # s<- community.sampler(Mod)
+  # s$select(0.5)
+  # ModSim <- system.simulate(100, Mod,sampler = s) # simulate
+  # print(impact.table(ModSim))
+  
+  if(weightSimulation){
+    uncertainSampleProbsDf <- sig_te_edges %>%
+    filter(Group == 1) %>%
+    select(Pair, Probability) %>%
+    distinct(Pair,.keep_all = TRUE)
+  
+    ModSim <- my.system.simulate(nSims, Mod,required.groups = c(0), uncertainSampleProbsDf=uncertainSampleProbsDf)
+  }else{
+    ModSim <- system.simulate(100, Mod)
+  }
+  
+  # Loop over interventions on each node → observe effect on "deployment"
+  all_nodes <- sig_nodes[sig_nodes != "deployment"]
+  # temp <- impact.table(ModSim)
+
+  for (node in all_nodes) {
+    press <- c(1)
+    names(press) <- node
+
+    # Set evidence and query deployment
+    temp <- impact.barplot.myMod(ModSim,
+        perturb = press,
+        plot=FALSE, percentage = TRUE
+    )
+    temp <- as.data.frame(t(temp["deployment",]))
+    temp$cluster <- paste(types_in_cluster, collapse = ", ")
+    temp$Press_perturb <- node
+    
+    qp_concept_cluster_results_df <- qp_concept_cluster_results_df %>% bind_rows(temp)
+    
+  }
+
+ 
+}
+
+
+qp_concept_cluster_results_df %>% 
+  group_by(Press_perturb) %>%
+  summarise(
+    avg_pos = mean(Positive, na.rm=T)
+  )
+
+
+
+# Plot results
+# For each ORO type
+
+ggplot(qp_concept_cluster_results_df %>% filter(Positive>0), 
+       aes(x=Press_perturb, y=stringr::str_wrap(cluster, width=10), fill = Positive))+
+  geom_tile()+
+  scale_fill_stepsn(name = stringr::str_wrap("Positive effect on deployment (% sims)", width=25), n.breaks=5, colours = viridis(5))+
+  labs(y="ORO type cluster",x="Press perturbation")+
+  theme_bw()+
+  theme(
+    legend.position = "bottom",
+    axis.text.x=element_text(angle=45, hjust=1)
+  )
+
+
+ggsave(
+  here::here("figures/supplemental/qp_concept_cluster_heatmap.pdf"),
+  width=5, height=4, units="in"
+)
 ```
 
 
