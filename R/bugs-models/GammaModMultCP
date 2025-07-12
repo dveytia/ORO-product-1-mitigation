@@ -1,5 +1,6 @@
 model {
   
+  
   #### Likelihood
 
   for(i in 1:length(x)){
@@ -8,6 +9,7 @@ model {
   }
   
   # Construct regressors using step function changepoint logic
+  
   for (k in 1:K_max) {
     for (i in 1:length(x)) {
       X[i, k] <- z[k] * step(x[i] - x_cp[k]) * (x[i] - x_cp[k])
@@ -24,12 +26,12 @@ model {
   for (k in 1:K_max) {
     beta[k+1] ~ dnorm(0, 0.01)
     x_cp[k] ~ dunif(cpmin, cpmax)
-    pk[k] ~ dbeta(2, 2)
+    pk[k] ~ dbeta(2, 0.5)
     z[k] ~ dbern(pk[k])
   }
 
   # Shape parameter for the Gamma distribution
-  shape ~ dgamma(1, 0.1)  # weakly informative prior
+  shape ~ dgamma(2, 0.1)  # weakly informative prior
 
   # Count of active changepoints
   K <- sum(z[])

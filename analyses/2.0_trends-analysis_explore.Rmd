@@ -1290,121 +1290,6 @@ ggsave(
 ```
 
 
-```{r use the unified model}
-# remotes::install_github("SWotherspoon/QPress")
-library(QPress)
-library(reshape2)
-nSims <- 5000
-
-source(here::here("R/impact.barplot.myMod"))
-source(here::here("R/extend.vector"))
-
-# Format data
-
-
-pooled_results_df <- data.frame()
-
-
-# maybe instead of by oro type, make edge weight proportional to agreement/consensus...
-# only simulate if deployment is present
-
-  
-sig_te_edges <- TE_results %>%
-  filter(TE_pval <= 0.05, TE_XCauseY == TRUE,!is.na(TE_ratio)) %>%
-  select(From=NodeX, To=NodeY) %>%
-  mutate(
-    Type = "P"
-  )
-
-sig_te_edges <- sig_te_edges[!duplicated(sig_te_edges),]
-
-sig_nodes <- as.character(unique(c(sig_te_edges$From, sig_te_edges$To)))
-
-sig_te_edges <- sig_te_edges %>%
-  mutate(
-    From = factor(From, levels = sig_nodes),
-    To = factor(To, levels=sig_nodes),
-    Type = factor(Type, levels = c("N","P","U","Z")),
-    Group = 0
-  )
-
-# Identify pairs
-pairNodes <- sig_te_edges[!apply(sig_te_edges[,1:2], 1, is.unsorted), 1:2]
-pairs <- rep(NA, length(nrow(sig_te_edges)))
-for(p in 1:nrow(pairNodes)){
-  for(i in 1:nrow(sig_te_edges)){
-    ispair <- sum(sig_te_edges[i,1:2] %in% pairNodes[p,])==2
-    if(ispair){
-      pairs[i] <- p
-    }else{
-      next
-    }
-  }
-}
-  
-sig_te_edges$Pair <- pairs  
-sig_te_edges$Pair[is.na(sig_te_edges$Pair)] <- seq(p+1, p+sum(is.na(sig_te_edges$Pair)))
-  
-
-
-# sig_te_edges$Pair <- 1:nrow(sig_te_edges) # need to fix this to find pairs?
-
-allEdgesLabels <- edge.labels(sig_te_edges) 
-
-# Mod <- retain.groups(sig_te_edges, groups=0) # all certain interactions
-Mod <- enforce.limitation(sig_te_edges) # enforce self-limiting effect
-
-ModSim <- system.simulate(100, Mod) # simulate
-
-# can I adjust the probability of selecting edges? 
-# but here all the uncertain edges are given the same weight.... 
-# need to figure out how to adjust this...maybe set a threshold?
-s <- community.sampler(edges)
-s$select(0.6)
-s$community()
-
-# Loop over interventions on each node → observe effect on "deployment"
-all_nodes <- sig_nodes[sig_nodes != "deployment"]
-# temp <- impact.table(ModSim)
-
-for (node in all_nodes) {
-  press <- c(1)
-  names(press) <- node
-
-  # Set evidence and query deployment
-  temp <- impact.barplot.myMod(ModSim,
-      perturb = press,
-      plot=FALSE, percentage = TRUE
-  )
-  temp <- as.data.frame(t(temp["deployment",]))
-  temp$oro_type <- oro
-  temp$Press_perturb <- node
-  
-  pooled_results_df <- pooled_results_df %>% bind_rows(temp)
-  
-}
-
-
-
-
-
-pooled_results_df %>% 
-  group_by(Press_perturb) %>%
-  summarise(
-    avg_pos = mean(Positive, na.rm=T)
-  )
-#   Press_perturb            avg_pos
-#   <chr>                      <dbl>
-# 1 legislation                  0  
-# 2 policy                      25  
-# 3 public interest             66.7
-# 4 public interest weighted    33.3
-# 5 public support              33.3
-# 6 publications                75 
-
-
-```
-
 
 
 
@@ -1470,7 +1355,7 @@ for(oro in oroTypes){
     modFile <- modelInputs$bugsModFiles[[components[i]]]
     
     # If OAE deployment, y is poisson not Gamma so change
-    if(components[i] == "deployment" & oro == "CDR-OAE"){
+    if(components[i] == "deployment" & oro %in% c("CDR-OAE")){
       modFile <- "R/bugs-models/PoissonModMultCP"
     }
     
@@ -1527,6 +1412,7 @@ for(oro in oroTypes){
       # Fill missing years with 0 values
       dat <- dat %>% tidyr::complete(year = yearLims[1]:yearLims[2])
       dat$y[is.na(dat$y)] <- 0
+      dat$y[dat$y==0] <- 0.1
       dat <- dat %>% tidyr::fill(component, oro_type, variable_name)
     }
     
@@ -1541,7 +1427,7 @@ for(oro in oroTypes){
     #with(dat, plot(year, y))
     
     jagsData$y <- dat$y
-    jagsData$x <- dat$year
+    jagsData$x <- dat$year 
     jagsData$MINX <- min(jagsData$x)
     jagsData$MAXX <- max(jagsData$x)
     jagsData$cpmin <- eval(parse(text = jagsData$cpmin))
@@ -1552,9 +1438,11 @@ for(oro in oroTypes){
       jagsData$cpmax <- jagsData$MAXX
     }
     
-    
+    # jagsData$log_y <- log(dat$y)
+    # jagsData$N <- length(dat$y)
     
     ## Fit mdel
+    modFile <- "R/bugs-models/GammaModMultCP"
     bugs.model <- readChar(modFile, file.info(modFile)$size)
     
     jagsModel <- tryCatch(
@@ -1563,7 +1451,7 @@ for(oro in oroTypes){
           file = textConnection(bugs.model),
           data = jagsData,
           inits = myinits,
-          n.chains = 3,
+          n.chains = 5,
           n.adapt = 1500,
           quiet = FALSE
         )
@@ -1610,7 +1498,10 @@ for(oro in oroTypes){
       
       # Find which change points mark a positive change in trend
       trends <- vector("numeric", K+1) # store the trend for each segment
-      starts <- c(min(jagsData$x), round(x_cp[pkIndKeep])) 
+      
+      # starts <- c(min(jagsData$x), round(x_cp[pkIndKeep])) 
+      starts <- c(min(jagsData$x), sort(round(x_cp[pkIndKeep])))
+      match(starts, round(x_cp[pkIndKeep]))
       ends <- c(round(x_cp[pkIndKeep]), max(jagsData$x))
       for(k in 1:(K+1)){
         if(grepl("Binom", modFile)){
@@ -1621,7 +1512,8 @@ for(oro in oroTypes){
         
       }
       # only keep the positive changes in trends
-      pkIndKeep <- pkIndKeep[which(0 < diff(trends))] 
+      matchInd <- match(starts[-1], round(x_cp[pkIndKeep]))
+      pkIndKeep <- pkIndKeep[matchInd[which(0 < diff(trends))]] 
       
       if(length(pkIndKeep) == 0){
         print("no changepoints marking increasing trend")
@@ -1629,13 +1521,13 @@ for(oro in oroTypes){
       }else{
         pkIndNames <- names(x_cp[pkIndKeep])
         
-        # If there are two cut points within 3 years of each other, 
-        # keep most probable one 
-        if(1 < length(pkIndKeep)){
-          if(diff(qs[pkIndNames,"50%"]) < 3){
-            pkIndNames <- pkIndNames[1]
-          }
-        }
+        # # If there are two cut points within 3 years of each other, 
+        # # keep most probable one 
+        # if(1 < length(pkIndKeep)){
+        #   if(diff(qs[pkIndNames,"50%"]) < 3){
+        #     pkIndNames <- pkIndNames[1]
+        #   }
+        # }
         
         # save probability density of the cut points for plotting
         calc_density <- function(vals){
@@ -1692,7 +1584,7 @@ CP attribution - if a deployment cutpoint is identified what other cutpoints hap
 # Load data from previous chunk
 load(here::here("outputs/cutpointResults_mitigation.RData"))
 
-oroTypes <- unique(cutpoint_results$oro_type)
+oroTypes <- c("CCS","Efficiency","MRE-Ocean","CDR-OAE") 
 
 attrCP_summary <- data.frame()
 for(oro in oroTypes){
@@ -1701,11 +1593,11 @@ for(oro in oroTypes){
   
   # For each deployment cutpoint, which other cutpoints ocurred within pm 2 years?
   for(cpid in unique(depCP$cp_id)){
-    targetYear <- depCP$year[depCP$cp_id == cpid]
+    targetYear <- round(depCP$year[depCP$cp_id == cpid])
     attrCPs <- cutpoint_results %>%
       filter(component != "deployment", oro_type == oro, quantile == "50%",
-             cp_id == cpid,
-             year <= targetYear+2 & targetYear-4 <= year)
+             # cp_id == cpid,
+             round(year) <= targetYear+3 & targetYear-3 <= round(year))
     
     attrCP_summary <- attrCP_summary %>%
       bind_rows(attrCPs)
@@ -1818,10 +1710,10 @@ changePoint_ggp <- ggplot()+
   scale_x_continuous(name = "Year")+
   
   # Color scales
- scale_color_manual(name="Median change-point",
-                  breaks = c("legislation","public interest","public interest weighted","public support" ),
-                  labels =c("Legislation","Public interest\n(N Posts)","Public interest (w)\n(N posts weighted)","Public support\n(N positive posts weighted)"),
-                  values = c("#7570b3","#1b9e77","#d95f02","#e78ac3")
+ scale_color_manual(name="Median\nchange-point",
+                  breaks = c("legislation","public interest","public interest weighted","public support","publications"),
+                  labels =c("Legislation","Public interest\n(N Posts)","Public interest (w)\n(N posts weighted)","Public support\n(N positive posts weighted)","Publications"),
+                  values = c("#7570b3","#1b9e77","#d95f02","#e78ac3","#377eb8")
                   )+
   # scale_fill_manual(name="Time series dataset",
   #                 breaks = c("legislation","public interest","public interest weighted","public support" ),
@@ -1841,10 +1733,10 @@ changePoint_ggp <- ggplot()+
 
 changePoint_ggp
 
-# ggsave(
-#   here::here("figures/main/changePointTimeSeries.pdf"),
-#   width = 7, height=8, units='in'
-# )
+ggsave(
+  here::here("figures/main/changePointTimeSeries.pdf"),plot=changePoint_ggp,
+  width = 5, height=7, units='in'
+)
 ```
 
 
