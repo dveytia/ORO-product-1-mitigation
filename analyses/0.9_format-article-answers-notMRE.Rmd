@@ -124,7 +124,7 @@ colnames(tmp)[-1] <- tolower(colnames(tmp))[-1]
 colnames(tmp)[-1] <- gsub(" ","_", colnames(tmp))[-1]
 colnames(tmp)[-1] <- gsub("[:?/]","", colnames(tmp))[-1]
 colnames(tmp)[6:10] <- c("language","population","intervention", "include","primary_research")
-vars2pivot <- colnames(tmp)[grep("language|population|intervention|primary|uncertain_screen|include|oro_type|ecosystem|implemented|upscale|policy|outcome", colnames(tmp))]
+vars2pivot <- colnames(tmp)[grep("language|population|intervention|primary|uncertain_screen|include|oro_type|ecosystem|implemented|upscal|policy|outcome", colnames(tmp))]
 idVar = "analysis_id" # name of id Variable to pivot by
 
 tmp$intervention[tmp$intervention == "false|||true"] <- "false"
@@ -192,13 +192,14 @@ ansWide[
 
 
 # # write to tab-delimited text file to import into python
-# write.table(ansWide, here::here("data/derived-data/screen-article-answers-formatted/articleAnswers_notMRE_formatted_2025-05-26.txt"), sep = "\t")
-
+# write.table(ansWide, here::here("data/derived-data/screen-article-answers-formatted/articleAnswers_notMRE_formatted_2025-05-26_v2.txt"), sep = "\t")
+# 
+# # Note the difference between original and v2 is that v1 was lacking the 'upscaling' column
 
 ```
 
 
-# 2025-05-27 For all ORO types, create binary label for study design: primary or secondary
+# NOT USED: 2025-05-27 For all ORO types, create binary label for study design: primary or secondary
 
 ```{r load article answers from sysrev downloaded on 2025-05 26 or 27 and format for python}
 

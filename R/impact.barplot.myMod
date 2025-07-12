@@ -1,0 +1,37 @@
+impact.barplot.myMod <- function(sim,perturb=0,monitor=NA,
+                                 epsilon=1.0E-5,main="",cex.axis=1, 
+                                 plot=TRUE, proportion=FALSE, percentage=FALSE) {
+  
+  As <- sim$A
+  nodes <- node.labels(sim$edges)
+  pal <- c("#00324d", "#808080", "#ffa200")
+  results <- matrix(0,length(nodes),3)
+  
+  perturb <- extend.vector(perturb,nodes,0)
+  monitor <- extend.vector(monitor,nodes,NA)
+  
+  for(i in seq_along(As)) {
+    impact <- signum(drop(As[[i]]%*%perturb),epsilon=epsilon)
+    if(all(monitor==impact,na.rm=T)) {
+      results <- results + outer(impact,-1:1,'==')
+    }
+  }
+  rownames(results) <- nodes
+  colnames(results) <- c("Negative", "No Change","Positive")
+  
+  if(isTRUE(plot)){
+    lwidth <- max(strwidth(nodes,units="inches",cex=cex.axis))
+    opar <- par(mai=c(1,lwidth+0.2,0.4,0.4)+0.2)
+    barplot(t(results/length(As)),horiz=T,las=1,border=F,col=pal,
+            xlab="Proportion",main=main,cex.axis=cex.axis)
+    par(opar)
+  }
+  
+  if(isTRUE(proportion)){
+    return(results/length(As))
+  }else if(isTRUE(percentage)){
+    return(results/length(As)*100)
+  }else{
+    return(results)
+  }
+}

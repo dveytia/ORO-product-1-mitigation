@@ -1,0 +1,94 @@
+---
+title: "2.0_compile-trends-data"
+author: "Devi Veytia"
+date: "2025-07-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r load libraries}
+
+# general data handing
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(ggplot2)
+library(ggalluvial)
+library(tidyr)
+library(stringr)
+library(viridis)
+library(countrycode)
+library(broom)
+library(conflicted)
+library(tidyverse)
+
+
+conflict_prefer("select", "dplyr")
+conflicts_prefer(dplyr::filter)
+
+
+
+## AESTHETICS
+factor_aes <- readxl::read_excel(here::here("R/mitigation_factor_aesthetics.xlsx"))
+typeAES <- factor_aes[which(factor_aes$variable == "oro_type"),]
+typeAES <- typeAES[order(typeAES$order),]
+
+
+```
+
+
+
+# Start with just MRE to explore.
+
+## Load data
+
+Data structure:
+list with each level is 
+- data frame for publications: 
+- data frame for n policy documents
+- data frame for deployment
+
+id variables: oro_type, component (publication, policy, deployment), variable_name,
+response variable: y
+
+```{r load data}
+
+load(here::here("data", "derived-data", "mitigationORO_pubs.RData")) #pubs
+# load(here::here("data", "derived-data", "mitigationORO_pubsProp.RData"))
+load(here::here("data", "derived-data", "n_nonBindPolicy_docs.RData")) # legDat
+load(here::here("data", "derived-data", "n_legislation_docs.RData")) # polDat
+load(here::here("data/derived-data/mitigationDeployDat.RData")) # allDeployDat
+load(here::here("data/derived-data/mitigationPostsDat.RData")) # postsDat
+
+year_lim <- c(2000, 2024)
+
+
+# bind all data together
+allComponentDat_model <- pubs %>%
+  bind_rows(polDat) %>%
+  bind_rows(legDat) %>%
+  bind_rows(allDeployDat) %>%
+  bind_rows(postsDat) %>%
+  mutate(
+    component = replace(component, component == "non-binding policy", "policy"),
+    # y = scale(y, center=TRUE, scale=TRUE)
+  ) %>%
+  filter(year_lim[1] <= year & year <= year_lim[2])
+
+summary(allComponentDat_model)
+unique(allComponentDat_model$oro_type)
+```
+
+
+
+# ORO type predictions and other coded variables -- readiness??
+
+
+# Mismatches: Compare sentiment vs N publications?
+
+

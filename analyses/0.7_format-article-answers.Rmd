@@ -85,7 +85,7 @@ colnames(tmp)[-1] <- tolower(colnames(tmp))[-1]
 colnames(tmp)[-1] <- gsub(" ","_", colnames(tmp))[-1]
 colnames(tmp)[-1] <- gsub("[:?/]","", colnames(tmp))[-1]
 colnames(tmp)[6:9] <- c("language","population","intervention","primary_research")
-vars2pivot <- colnames(tmp)[grep("language|population|intervetnion|primary|include|oro_type|ecosystem|implemented|upscale|policy|outcome", colnames(tmp))]
+vars2pivot <- colnames(tmp)[grep("language|population|intervetnion|primary|include|oro_type|ecosystem|implemented|upscal|policy|outcome", colnames(tmp))]
 idVar = "analysis_id" # name of id Variable to pivot by
 
 # Format into wide format by column name
@@ -110,8 +110,9 @@ ansWide <- ansWide %>%
 summary(ansWide)
 
 # # write to tab-delimited text file to import into python
-# write.table(ansWide, here::here("data/derived-data/screen-article-answers-formatted/articleAnswers_formatted_2025-03-17.txt"), sep = "\t")
+# write.table(ansWide, here::here("data/derived-data/screen-article-answers-formatted/articleAnswers_formatted_2025-03-17_v2.txt"), sep = "\t")
 
+## Note the difference between v2 and v1 is that v1 is missing the upscaling column
 
 ```
 

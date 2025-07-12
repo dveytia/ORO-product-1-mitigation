@@ -1,0 +1,1548 @@
+---
+title: "2.0_compile-trends-data"
+author: "Devi Veytia"
+date: "2025-07-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r load libraries}
+
+# general data handing
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(ggplot2)
+library(ggalluvial)
+library(tidyr)
+library(stringr)
+library(viridis)
+library(countrycode)
+library(broom)
+library(conflicted)
+library(tidyverse)
+
+
+conflict_prefer("select", "dplyr")
+conflicts_prefer(dplyr::filter)
+
+
+
+## AESTHETICS
+factor_aes <- readxl::read_excel(here::here("R/mitigation_factor_aesthetics.xlsx"))
+typeAES <- factor_aes[which(factor_aes$variable == "oro_type"),]
+typeAES <- typeAES[order(typeAES$order),]
+
+
+```
+
+
+
+
+
+## Load data
+
+Data structure:
+list with each level is 
+- data frame for publications: 
+- data frame for n policy documents
+- data frame for deployment
+
+id variables: oro_type, component (publication, policy, deployment), variable_name,
+response variable: y
+
+```{r load data}
+
+load(here::here("data", "derived-data", "mitigationORO_pubs.RData")) #pubs
+# load(here::here("data", "derived-data", "mitigationORO_pubsProp.RData"))
+load(here::here("data", "derived-data", "n_nonBindPolicy_docs.RData")) # legDat
+load(here::here("data", "derived-data", "n_legislation_docs.RData")) # polDat
+load(here::here("data/derived-data/mitigationDeployDat.RData")) # allDeployDat
+load(here::here("data/derived-data/mitigationPostsDat.RData")) # postsDat
+
+year_lim <- c(2000, 2024)
+
+
+# bind all data together
+allComponentDat_model <- pubs %>%
+  bind_rows(polDat) %>%
+  bind_rows(legDat) %>%
+  bind_rows(allDeployDat) %>%
+  bind_rows(postsDat) %>%
+  mutate(
+    component = replace(component, component == "non-binding policy", "policy"),
+    # y = scale(y, center=TRUE, scale=TRUE)
+  ) %>%
+  filter(year_lim[1] <= year & year <= year_lim[2])
+
+
+```
+
+
+# Transfer entropy
+
+Publications: 
+
+* Behrendt et al. 2019. RTransferEntropy—Quantifyinginformationflowbetweendifferent timeseriesusingeffective transfer entropy
+* **Amornbunchornvej et al 2021. Variable-lag Granger Causality and Transfer Entropy for Time Series Analysis**
+
+Uses: To detect significance of information flow from X -> Y with a time lag. unlike Granger Causaility, can detect non-linear relationships.
+
+Data Assumptions:
+
+* evenly spaced, no NA (fill NAs with 0 in our time series)
+* stationary data: refers to the idea that the statistical properties of a time series do not change over time. More specifically, a stationary time series is one in which the mean, variance, and autocorrelation structure are constant over time (no noticible changing levels, increasing variance). (use Box-Cox transform to make data normal)
+* time lag is fixed (except see variable lag-Transfer entropy with bootstrapping, as bootstrapping approach increases the performance of transfer entropy methods in this task - install.packages("VLTimeCausality"))
+
+
+Pipeline:
+
+* correct for heteroskedasity using a Box-Cox transformation to make your data normal (caret::BoxCoxTrans)
+* get an iterable list of the pairwise edges for the different nodes in the time series
+* Use VL-TE (bootstrapped) from the VLTTimeCausality package to get TE ratio and p-value (higher the ratio, stronger evidence for causality)
+* Plot the TE ratio for each of the edges to determine the evidence for the relationship 
+
+```{r VL-TE analysis, eval = FALSE}
+# remotes::install_github("DarkEyes/VLTimeSeriesCausality")
+require(VLTimeCausality)
+
+# Define levels to loop through
+
+# Loop 1 -- different oros
+oros <- unique(allComponentDat_model$oro_type)
+
+# Loop 2 -- process all possible edges
+# Define nodes and edges to process
+nodes <- unique(allComponentDat_model$component)
+edges <- expand.grid(nodes, nodes)
+# edges <- edges[!apply(edges, 1, is.unsorted), ] # if order doesn't matter? if causality is tested in both directions...
+edges <- edges[edges[,1] != edges[,2],]
+
+
+
+# Function to make BoxCoxTransformation -- make data normal
+BCTransform <- function(series){
+  BCMod <- caret::BoxCoxTrans(series)
+  series_trans <- predict(BCMod, series)
+}
+
+try_BCTransform <- function(series){
+  tryCatch(
+    {BCTransform(series)},
+    error = function(e){
+      return(series)
+    }
+  )
+}
+
+
+# Define function to only use BC transform is HeteroSkedasticity present?
+correctHeteroskedasticity <- function(series, years){
+  lmMod <- lm(series~years)
+  isHet <- lmtest::bptest(lmMod)
+  if(isHet$p.value <= 0.05){
+    series_trans <- BCTransform(series)
+    return(series_trans)
+  }else{
+    return(series)
+  }
+}
+try_correctHeteroskedasticity <- function(series, years){
+  tryCatch(
+    {correctHeteroskedasticity(series, years)},
+    error = function(e){
+      return(series)
+    }
+  )
+}
+
+
+
+## Loop 1 -- loop through OROs
+TE_results <- data.frame()
+TE_results_summary <- data.frame()
+for(oro in oros){
+  # oro <- "MRE-Ocean" # for testing
+  
+  # Data processing
+  # Fillin missing values with a 0 -- so that same years are represented across time series
+  # correct for heteroskedasiticy
+  oroDat <- allComponentDat_model %>%
+    filter(oro_type == oro) %>%
+    complete(component, year=year_lim[1]:year_lim[2], 
+             fill = list(y=0), explicit= FALSE) %>%
+    group_by(component) %>%
+    mutate(y_trans = try_BCTransform(y)) %>%
+    ungroup()
+  # ggplot(oroDat, aes(x=year, y=y_trans))+geom_line()+facet_wrap(vars(component), scales="free_y")
+  
+  
+  
+  edgesResults <- data.frame(
+    oro_type = rep(oro, nrow(edges)),
+    NodeX = edges[,1],
+    NodeY = edges[,2],
+    TE_XCauseY = rep(NA, nrow(edges)),
+    TE_pval = rep(NA, nrow(edges)),
+    TE_ratio = rep(NA, nrow(edges))
+  )
+  
+  # Loop through the edges and test for causality
+  for(e in 1:nrow(edges)){
+
+    TE_out <- tryCatch(
+      {VLTransferEntropy(
+      Y= oroDat$y_trans[oroDat$component == edges[e,1]],
+      X= oroDat$y_trans[oroDat$component == edges[e,2]],
+      maxLag = 5,
+      VLflag=TRUE,nboot=100, alpha = 0.05)},
+      error = function(e){
+        return(NULL)
+      }
+    )
+    if(is.null(TE_out)){
+      edgesResults$TE_pval[e] <- NA
+      edgesResults$TE_XCauseY[e] <- NA
+      edgesResults$TE_ratio[e] <- NA
+    }else{
+      edgesResults$TE_pval[e] <- TE_out$pval
+      edgesResults$TE_XCauseY[e] <- TE_out$XgCsY_trns # TS$X causes TS$Y TRUE/FALSE
+      edgesResults$TE_ratio[e] <- TE_out$TEratio
+    }
+    
+    
+  }
+  
+  # summarize results to most causal direction if a two-way effect found
+  # ie. When TRUE for both directions, resolve by picking the direction with the highest TE ratio
+  edgesResultsSummary <- data.frame()
+  uniqueEdges <- edges[!apply(edges, 1, is.unsorted), ]
+  for(ue in 1:nrow(uniqueEdges)){
+    
+    incl = vector(length = nrow(edgesResults))
+    for(i in 1:nrow(edgesResults)){
+      tmp <- c(edgesResults[i,c("NodeX","NodeY")]) %in% uniqueEdges[ue,]
+      incl[i] <- sum(tmp)==2
+    }
+    tmpDat <- edgesResults[incl,] %>%
+      filter(TE_XCauseY) %>%
+      arrange(desc(TE_ratio)) %>%
+      slice_head(n=1)
+    
+    edgesResultsSummary <- edgesResultsSummary %>%
+      bind_rows(tmpDat)
+  }
+  
+    
+  # Bind results
+  TE_results <- TE_results %>%
+    bind_rows(edgesResults)
+  TE_results_summary <- TE_results_summary %>%
+    bind_rows(edgesResultsSummary)
+  
+}
+
+# clean
+rm(oroDat, nodes, edges, TE_out, edgesResults)
+
+
+
+## Check data
+# View(TE_results)
+# View(TE_results_summary)
+# TE_results %>% filter(!is.na(TE_XCauseY)) %>%filter(TE_XCauseY == TRUE)  %>% View
+
+
+# save(TE_results, TE_results_summary, file = here::here("data/derived-data/TE_results.RData"))
+```
+
+
+
+
+## Synthesizing results: At the oro level
+
+1. Build a Directed Causal Graph per oro_type
+🔧 Description:
+Convert each oro_type group into a directed graph:
+
+Nodes = time series variables (e.g. policy, public support)
+
+Directed Edges = significant NodeX → NodeY pairs with TE_pval < α (e.g. 0.05)
+
+Edge weight = TE_ratio (strength of causality)
+
+This structure allows visual exploration, network metrics (e.g. in-degree), and cross-type comparisons.
+```{r Directed Causal Graph of TE results}
+
+require(igraph)
+
+oroTypes <- unique(TE_results$oro_type)
+
+
+# par(mfrow=c(5,2))
+
+for(i in oroTypes){
+  # Example for one oro_type
+  g <- graph_from_data_frame(
+    TE_results[TE_results$oro_type == oroTypes[i] & 
+                 TE_results$TE_pval < 0.05 & 
+                 !is.na(TE_results$TE_ratio) &
+                 TE_results$TE_ratio > 0, 
+               c("NodeX", "NodeY", "TE_ratio")], 
+    directed = TRUE
+  )
+  plot(g, edge.width = E(g)$TE_ratio, main = paste0(letters[i],") ",oroTypes[i]),)
+
+}
+
+par(mfrow=c(1,1))
+```
+
+
+
+
+
+
+2. Normalize and Aggregate Causal Strengths Across oro_types
+🔧 Description:
+Aggregate the TE results across oro_types to build a meta-causal graph:
+
+For each unique NodeX → NodeY, compute:
+
+N significant: how many oro_types had significant causality. This indicates agreement/consistency
+
+Mean TE_ratio: average causal strength across significant cases.
+
+
+
+🧠 Why:
+To generalize relationships beyond a specific topic and reveal robust, cross-domain causal signals.
+
+
+Visualize the aggregated meta-network where:
+
+* Edge width = average TE ratio.
+* Edge transparency = consistency (e.g. normalized N significant).
+* Node size = degree or centrality.
+
+```{r meta network aggregated across oro types}
+
+meta_links <- TE_results %>%
+  filter(TE_pval < 0.05, !is.na(TE_ratio), TE_ratio > 0) %>%
+  group_by(NodeX, NodeY) %>%
+  summarise(
+    n_sig = n(),
+    avg_ratio = mean(TE_ratio, na.rm = TRUE),
+    .groups = 'drop'
+  )%>%
+  mutate(
+    relative_nsig = n_sig / max(n_sig)
+  ) %>%
+  arrange(desc(relative_nsig), desc(avg_ratio)) 
+
+
+# Calculate clusters
+clusters <- cluster_walktrap(meta_graph)
+
+
+# Visualize meta network
+# arrow width ~ average TE_ratio
+# arrow colour ~ agreement
+# node colour ~ cluster
+
+meta_graph <- graph_from_data_frame(meta_links, directed = TRUE)
+E(meta_graph)$weight <- meta_links$avg_ratio
+E(meta_graph)$color <- scales::alpha("black", meta_links$relative_nsig)
+
+svg(file = here::here("figures/supplemental/meta_TE_network_diagraph.svg"),width = 8, height = 8)
+plot(meta_graph, edge.width = log1p(E(meta_graph)$weight) * 1.5,vertex.color = clusters$membership)
+dev.off()
+
+```
+
+4. Quantify Node Importance and Influence
+🔧 Description:
+Use network centrality metrics:
+
+* Out-degree / in-degree: raw count of causal effects given/received.
+* Eigenvector or PageRank: influence in the broader network.
+* Betweenness: mediators (e.g. public interest as intermediary).
+
+🧠 Why:
+Identifies "driver" vs "responder" nodes across domains.
+```{r node importance and influence}
+# causal influencers
+degree(meta_graph, mode = "out") %>% sort(decreasing = T)   
+# public support   public interest weighted             publications
+
+# causal responders
+degree(meta_graph, mode = "in") %>% sort(decreasing = T)   
+# public interest weighted           public support               deployment
+
+# general influence
+sort(eigen_centrality(meta_graph)$vector, decreasing =TRUE)  
+# public interest public interest weighted              legislation
+
+# mediators
+sort(betweenness(meta_graph), decreasing=TRUE)
+# deployment           public support             publications
+
+```
+
+
+
+Identify subsystems at the meta level
+🔧 Description:
+Use community detection or hierarchical clustering to identify subsystems (e.g., policy ↔ public interest loop).
+
+🧠 Why:
+Find recurring causal motifs or domain-specific differences.
+
+```{r Cluster nodes and plot the meta network}
+clusters <- cluster_walktrap(meta_graph)
+
+
+svg(file = here::here("figures/supplemental/meta_TE_network_diagraph.svg"),width = 8, height = 8)
+plot(meta_graph, vertex.color = clusters$membership)
+dev.off()
+
+```
+
+
+Cluster or compare the causal network structure across oro_type groups to identify:
+
+* Similar causal pathways or influence patterns.
+* oro_types that share a structural "causal fingerprint".
+
+Method:
+
+* Build a causal graph (adjacency matrix) for each oro_type.
+* Vectorize or embed each graph to a comparable format.
+* Compute distance or similarity between oro_type graphs.
+* Cluster the oro_types.
+* Visualize with dendrograms or MDS plots.
+```{r}
+
+## Adjacency matrix
+
+nodes <- unique(c(TE_results$NodeX, TE_results$NodeY))
+edge_names <- as.vector(outer(nodes, nodes, FUN = function(x, y) paste0(x, " - ", y)))
+
+# Create adjacency matrix for each oro_type
+make_adj_matrix <- function(df, nodes, edge_names) {
+  
+  
+  # adj <- matrix(0, nrow = length(nodes), ncol = length(nodes),
+  #               dimnames = list(nodes, nodes))
+  adj <- rep(NA, length(edge_names))
+  names(adj) <- edge_names
+  
+  sig_edges <- df %>% filter(TE_pval < 0.05)
+  
+  for (i in 1:nrow(sig_edges)) {
+    
+    x <- sig_edges$NodeX[i]
+    y <- sig_edges$NodeY[i]
+    edge_name <- paste0(x, " - ", y)
+    
+    if (!is.na(x) && !is.na(y)) {
+      adj[edge_name] <- sig_edges$TE_ratio[i]
+    }
+  }
+  return(adj)
+}
+
+# One matrix per oro_type
+oroTypes <- unique(TE_results$oro_type)
+oro_adj_list <- list()
+for(oro in oroTypes){
+  oro_adj_list[[oro]] <- make_adj_matrix(TE_results %>% filter(oro_type == oro), nodes = nodes, edge_names = edge_names)
+}
+
+
+# oro_adj_list <- TE_results %>%
+#   # filter(!is.na(TE_ratio), 0 < TE_ratio, 0.05 <= TE_pval) %>%
+#   group_split(oro_type) %>%
+#   setNames(unique(TE_results$oro_type)) %>%
+#   lapply(make_adj_matrix, nodes = nodes, edge_names = edge_names)
+
+
+# Vectorize (row-wise)
+# Each adjacency matrix is flattened into a vector so we can compute pairwise distances.
+adj_vectors <- lapply(oro_adj_list, function(mat) as.vector(t(mat)))
+adj_matrix <- do.call(rbind, adj_vectors)
+rownames(adj_matrix) <- names(oro_adj_list)
+colnames(adj_matrix) <- edge_names
+
+# Compute distance matrix between oro types
+# Remove MRE-Bio which makes NA
+#adj_matrix[-which(rownames(adj_matrix)=="MRE-Bio"),]
+dist_adj_mat <- adj_matrix
+dist_adj_mat[is.na(dist_adj_mat)] <- 0
+dist_matrix <- stats::dist(dist_adj_mat, method = "euclidean")
+
+
+## Cluster the oro types
+hc <- hclust(dist_matrix, method = "ward.D2")
+
+svg(filename=here::here("figures/supplemental/TE_network_oro_cluster_dendogram.svg"), width=7, height=6)
+plot(hc, main = "Dendogram of TE causal networks clustering by ORO type", xlab = "")
+dev.off()
+
+
+adj_matrix_subset <- adj_matrix[,apply(adj_matrix, 2, function(x){max(x, na.rm=T)>0})]
+adj_matrix_subset <- adj_matrix_subset[,!is.na(colnames(adj_matrix_subset))]
+
+## Look at the per edge values
+# colour bar shows TE_ratio
+pheatmap::pheatmap(
+  adj_matrix_subset, 
+  cluster_rows = FALSE, cluster_cols = FALSE,
+  # main = "ORO type clustered by TE causal network",
+  cellwidth = 15, cellheight = 15,
+  fontsize = 10,
+  legend_labels = TRUE,
+  angle_col = "90",
+  width = 10, height = 6,
+  filename = here::here("figures/supplemental/TE_network_oro_cluster_heatmap2.pdf"),
+)
+dev.off()
+
+
+```
+
+
+Visualize the networks of each oro type cluster
+```{r Visualize the networks of each oro type cluster}
+# Cut into 5 clusters
+n_clusters <- 5
+oro_type_clusters <- cutree(hc, k = n_clusters)
+
+# Create a data.frame for lookup
+cluster_df <- data.frame(
+  oro_type = names(oro_type_clusters),
+  cluster = oro_type_clusters
+)
+
+
+# List to hold one meta-graph per cluster
+meta_graphs <- vector("list", n_clusters)
+cluster_names <- vector("list", n_clusters)
+
+for (k in 1:n_clusters) {
+  # Get oro_types in this cluster
+  types_in_cluster <- cluster_df %>%
+    filter(cluster == k) %>%
+    pull(oro_type)
+  
+  # Filter TE results for these oro_types and significant edges
+  cluster_te <- TE_results %>%
+    filter(oro_type %in% types_in_cluster, 
+           TE_pval < 0.05,
+           !is.na(TE_ratio),
+           0 < TE_ratio
+           )
+  
+  # Aggregate TE_ratio per NodeX → NodeY pair
+  edge_summary <- cluster_te %>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      n_sig = n(),
+      avg_ratio = mean(TE_ratio, na.rm = TRUE),
+      .groups = 'drop'
+    )%>%
+    mutate(
+      relative_nsig = n_sig / max(n_sig)
+    )
+  
+  # Build igraph object
+  g <- graph_from_data_frame(edge_summary, directed = TRUE)
+  
+  # Set edge weights and labels
+  E(g)$weight <- edge_summary$avg_ratio
+  E(g)$width <- log1p(E(g)$weight) * 1.5
+  E(g)$color <- scales::alpha("black", edge_summary$relative_nsig)
+  
+  meta_graphs[[k]] <- g
+  cluster_names[[k]] <- paste(types_in_cluster, collapse = ", ")
+}
+
+
+
+
+
+
+
+
+require(grid)
+require(gridExtra)
+require(png)
+
+# Function to plot a graph with a title
+capture_plot_as_raster <- function(g, k) {
+  # Create a temporary PNG file
+  tmpfile <- tempfile(fileext = ".png")
+  
+  # Open PNG device
+  png(tmpfile, width = 800, height = 800, res = 150)
+  
+  # Base plot (to file)
+  plot(g,
+       main = paste(cluster_names[[k]]),
+       edge.arrow.size = 0.4,
+       # edge.label = E(g)$label,
+       edge.color = "black",
+       vertex.label.cex = 1,
+       layout = layout_with_fr(g))
+  
+  dev.off()
+  
+  # Read and convert to rasterGrob
+  img <- readPNG(tmpfile)
+  file.remove(tmpfile)
+  rasterGrob(img, interpolate = TRUE)
+}
+
+
+# Capture each plot
+plots <- lapply(1:n_clusters, function(k) capture_plot_as_raster(meta_graphs[[k]], k))
+
+
+# Arrange all plots
+pdf(here::here("figures/supplemental/cluter_level_networks.pdf"),
+    width = 10, height = 10)
+gridExtra::grid.arrange(grobs = plots, ncol = 2)
+
+dev.off()
+```
+
+```{r cluster level networsk as ggplot}
+library(ggraph)
+library(tidygraph)
+library(ggplot2)
+
+nodeTextSize <- 3
+titleSize <- 10
+
+nodeColPal <- c(
+  "publications"="#377eb8",
+  "policy"="#984ea3",
+  "legislation"="#984ea3",
+  "public interest"="#ff7f00",
+  "public interest weighted"="#ff7f00",
+  "public support"="#ff7f00",
+  "deployment"="#e41a1c"
+)
+
+# Convert network to ggplot
+plot_ggraph_network <- function(g, cluster_id, cluster_label) {
+  g_tidy <- as_tbl_graph(g)
+  
+  ggraph(g_tidy, layout = "circle") +  # You can try "kk" or "circle" or "fr" for spacing
+    geom_edge_link(aes(width = 1/log1p(weight), alpha = relative_nsig),
+                   arrow = arrow(length = unit(5, 'mm')),
+                   color = "black", show.legend = FALSE) +
+    geom_node_point(size = 6, aes(color = name)) +
+    scale_color_manual(values = nodeColPal, guide="none")+
+    geom_node_label(aes(label = name), repel = TRUE, #nudge_x=0.1, nudge_y = 0.1
+                   size = nodeTextSize, alpha=0.8
+                   ) +
+    labs(title = paste(cluster_label)) +
+    theme_void() +
+    theme(
+      plot.title = element_text(size = titleSize, hjust = 0.5),
+      plot.margin = unit(c(5,5,5,5), units = "mm")
+      )
+}
+
+cluster_order <- c(3,4,2,5,1)#1:n_clusters
+ggraph_plots <- lapply(cluster_order, function(k) {
+  plot_ggraph_network(meta_graphs[[k]], k, cluster_names[[k]])
+})
+
+
+library(ggdendro)
+
+# Convert to dendrogram object
+dend <- as.dendrogram(hc)
+dend_data <- dendro_data(dend)
+
+# Basic dendrogram as ggplot
+dend_plot <- ggplot(segment(dend_data)) +
+  geom_segment(aes(x=x, y=y, xend=xend, yend=yend)) +
+  theme_void() +
+  geom_text(aes(x = x, y = y, label = label, angle = -90, hjust = 0), data= label(dend_data), angle = 45, hjust=1)+
+  # scale_y_continuous(expand = c(0.3, 0))+
+  # scale_x_continuous(expand = c(0.1, 0))+
+  coord_cartesian(clip="off")+
+  labs(y="",x="")+
+  theme(
+    axis.text = element_blank(), 
+    axis.ticks = element_blank(),
+    plot.margin = unit(c(0,0,2,1), units = "cm")
+    ) 
+dend_plot
+
+library(patchwork)
+
+# Arrange the ggraph plots horizontally according to cluster number
+networks_row <- wrap_plots(ggraph_plots, nrow = 1)
+
+# Combine vertically with the dendrogram
+final_plot <- dend_plot / networks_row + plot_layout(heights = c(1, 3))
+
+# Show or save
+
+ggsave(filename=here::here("figures/supplemental/cluster_networks_aligned.pdf"), final_plot, width = 20, height = 8)
+
+```
+
+
+For clusters 3, 4 and 1, where there are more complicated interactions with deployment, what are the impacts of increasing public interest, publications or policy/legislation on deployment?
+
+
+## Build a Probabilistic Graphical Model
+
+
+🔧 Description:
+Fit a Bayesian Network or Structural Equation Model based on the TE graph structure:
+
+Use TE significance as prior knowledge.
+
+Let the model estimate edge strengths (conditional probabilities or regression weights).
+
+🧠 Why:
+Statistically grounded way to model uncertainty and dependencies beyond pairwise effects.
+
+Try 1 : baysean network. But I'm not convinced
+```{r build graphical model - Baysean network}
+
+library(bnlearn)
+library(dplyr)
+library(gRain)
+
+
+# # Functions to simulate counterfactuals
+# simulate_counterfactual <- function(fit) {
+#   grain_bn <- as.grain(fit)
+#   grain_cf <- setEvidence(grain_bn, nodes = "policy", states = "high")
+#   querygrain(grain_cf, nodes = "actions", type = "distribution")$actions
+# }
+# 
+
+
+
+# Format data
+
+oroTypes <- unique(allComponentDat_model$oro_type)
+results_list <- list()
+
+for (oro in oroTypes) {
+  
+  
+  sig_te_edges <- TE_results_summary %>%
+    filter(TE_pval <= 0.05, TE_XCauseY == TRUE,!is.na(TE_ratio), oro_type == oro) %>%
+    select(from=NodeX, to=NodeY) 
+  sig_te_edges <- apply(sig_te_edges, 2, function(x){gsub(" ","_", x)})
+  sig_te_edges <- as.data.frame(
+    sig_te_edges
+  )
+    # distinct(NodeX, NodeY)
+  
+  sig_nodes <- as.character(unique(c(sig_te_edges$from, sig_te_edges$to)))
+  if(length(sig_nodes)<1){
+    next
+  }
+  
+  dag_from_te <- empty.graph(nodes = gsub(" ","_", sig_nodes))
+  arcs(dag_from_te) <- as.matrix(sig_te_edges)
+  
+  # Prepare time series
+  data_oro <- allComponentDat_model %>% 
+    filter(oro_type == oro) %>%
+    pivot_wider(id_cols = c(year), names_from = component, values_from = y) 
+  colnames(data_oro) <- gsub(" ","_", colnames(data_oro))
+  data_oro <- data_oro[,sig_nodes]
+  # data_oro[is.na(data_oro)] <- 0
+  
+  # remove obs with only NA
+  data_oro <- data_oro[apply(data_oro, 1, function(y) !all(is.na(y))),]
+  
+  # discretize
+  data_oro <- discretize(data_oro, method = "interval", breaks=10)
+
+
+  bn_fit <- bn.fit(dag_from_te, data = data_oro, method = "mle")
+  grain_bn <- as.grain(bn_fit)
+  # # or bootstrapped
+  # boot_res <- boot.strength(data_oro[,sig_nodes], R = 500, algorithm = "hc", algorithm.args = list(whitelist = arcs(dag_from_te)))
+  # bootstrap_fits <- averaged.network(boot_res, threshold = 0.85)  #only keep strong edges
+  # # simulate counterfactual
+  # fits <- lapply(bootstrap_fits$nodes, function(dag) bn.fit(dag, data_oro))
+  # cf_dists <- lapply(fits, simulate_counterfactual)
+  # grain_bn <- as.grain(fits[[1]])
+  
+  # simulate cf
+  # Set evidence (intervene on policy)
+  grain_cf <- setEvidence(grain_bn, nodes = "policy", states = "high")
+
+  # Get updated beliefs for deployment
+  cf_deployment <- querygrain(grain_cf, nodes = "deployment", type = "marginal")
+
+  # Baseline belief (no intervention)
+  baseline_deployment <- querygrain(grain_bn, nodes = "deployment", type = "marginal")
+  
+  # Compate baseline vs cf
+  cf <- cf_deployment$deployment
+  base <- baseline_deployment$deployment
+  print(base-cf)
+  
+  # 7. Loop over interventions on each node → observe effect on "deployment"
+  # Since you’re simulating an intervention (e.g. P(deployment | do(policy = high))), what you want is the marginal distribution of deployment given the intervention.
+  all_nodes <- nodes[nodes != "deployment"]
+  cf_results <- list()
+
+  for (node in all_nodes) {
+    for (state in c("high")) { # c("low","medium","high")
+      # Set evidence and query deployment
+      bn_cf <- setEvidence(grain_bn, nodes = node, states = state)
+      cf_deploy <- querygrain(bn_cf, nodes = "deployment", type = "marginal")
+      cf_results[[paste(node, state, sep = "_")]] <- cf_deploy
+    }
+  }
+  
+  # baseline (no intervention)
+  baseline <- querygrain(grain_bn, nodes = "deployment", type = "marginal")
+  
+  # Compile
+  results_list[[oro]] <- list(
+    nodes = nodes,
+    dag = dag,
+    fit = fit,
+    baseline = baseline,
+    counterfactuals = cf_results
+  )
+
+ 
+}
+
+
+
+
+## Visualize
+cfDeltas <- data.frame()
+for(oro in oroTypes){
+  cf <- results_list[[oro]]$counterfactuals
+  baseline <- results_list[[oro]]$baseline
+  
+  if(is.null(baseline)){
+    next
+  }
+  
+  # Step 1: Get bin names and extract midpoints
+  sample_probs <- cf_df$Probability[1]$deployment
+  bin_names <- names(sample_probs)
+  
+  # Extract numeric midpoints from bin labels like "(4.7,8.4]"
+  get_midpoint <- function(bin_label) {
+    nums <- as.numeric(str_extract_all(bin_label, "[0-9.]+")[[1]])
+    mean(nums)
+  }
+  
+  bin_midpoints <- sapply(bin_names, get_midpoint)
+  
+  # Step 2: Get baseline EV
+  baseline_probs <- baseline$deployment[bin_names]
+  baseline_ev <- sum(baseline_probs * bin_midpoints)
+  
+  # Step 3: Compute expected values from counterfactuals
+  cf_ev_df <- map_dfr(seq_along(cf_df$Probability), function(i) {
+    p <- cf_df$Probability[i]$deployment[bin_names]
+    ev <- sum(p * bin_midpoints)
+    tibble(
+      Intervention = cf_df$Intervention[i],
+      ExpectedValue = ev
+    )
+  }) %>%
+    mutate(DeltaEV = ExpectedValue - baseline_ev)
+  cf_ev_df$oro_type = oro
+  
+  cfDeltas <- cfDeltas %>% bind_rows(cf_ev_df)
+}
+
+summary(cfDeltas) # does'nt work, all the deltas are 0
+
+# ggplot(cf_ev_df, aes(x = reorder(Intervention, DeltaEV), y = DeltaEV, fill = DeltaEV > 0)) +
+#   geom_col(show.legend = FALSE) +
+#   coord_flip() +
+#   labs(
+#     title = "Change in Expected Deployment from Interventions",
+#     x = "Intervention",
+#     y = expression(Delta*" Expected Deployment")
+#   )
+
+
+```
+
+```{r build qualitative network model for each oro}
+# remotes::install_github("SWotherspoon/QPress")
+library(QPress)
+library(reshape2)
+nSims <- 5000
+
+source(here::here("R/impact.barplot.myMod"))
+source(here::here("R/extend.vector"))
+
+# Format data
+
+oroTypes <- unique(allComponentDat_model$oro_type)
+results_df <- data.frame()
+
+
+# maybe instead of by oro type, make edge weight proportional to agreement/consensus...
+# only simulate if deployment is present
+for (oro in oroTypes) {
+  
+  sig_te_edges <- TE_results %>%
+    filter(TE_pval <= 0.05, TE_XCauseY == TRUE,!is.na(TE_ratio), oro_type == oro) %>%
+    select(From=NodeX, To=NodeY) %>%
+    mutate(
+      Type = "P"
+    )
+  
+  
+  sig_nodes <- as.character(unique(c(sig_te_edges$From, sig_te_edges$To)))
+  if(length(sig_nodes)<1){
+    next
+  }
+  if(!("deployment" %in% sig_nodes)){
+    next
+  }
+  
+  sig_te_edges <- sig_te_edges %>%
+    mutate(
+      From = factor(From, levels = sig_nodes),
+      To = factor(To, levels=sig_nodes),
+      Type = factor(Type, levels = c("N","P","U","Z")),
+      Group = 0
+    )
+  sig_te_edges$Pair <- 1:nrow(sig_te_edges)
+  
+  allEdgesLabels <- edge.labels(sig_te_edges) 
+  
+  Mod <- retain.groups(sig_te_edges, groups=0) # all certain interactions
+  Mod <- enforce.limitation(sig_te_edges) # enforce self-limiting effect
+  ModSim <- system.simulate(nSims, Mod) # simulate
+  
+  
+  
+  # Loop over interventions on each node → observe effect on "deployment"
+  all_nodes <- sig_nodes[sig_nodes != "deployment"]
+  # temp <- impact.table(ModSim)
+
+  for (node in all_nodes) {
+    press <- c(1)
+    names(press) <- node
+
+    # Set evidence and query deployment
+    temp <- impact.barplot.myMod(ModSim,
+        perturb = press,
+        plot=FALSE, percentage = TRUE
+    )
+    temp <- as.data.frame(t(temp["deployment",]))
+    temp$oro_type <- oro
+    temp$Press_perturb <- node
+    
+    results_df <- results_df %>% bind_rows(temp)
+    
+  }
+
+ 
+}
+
+
+results_df %>% 
+  group_by(Press_perturb) %>%
+  summarise(
+    avg_pos = mean(Positive, na.rm=T)
+  )
+#   Press_perturb            avg_pos
+#   <chr>                      <dbl>
+# 1 legislation                  0  
+# 2 policy                      25  
+# 3 public interest             66.7
+# 4 public interest weighted    33.3
+# 5 public support              33.3
+# 6 publications                75 
+
+
+```
+
+
+```{r use the unified model}
+# remotes::install_github("SWotherspoon/QPress")
+library(QPress)
+library(reshape2)
+nSims <- 5000
+
+source(here::here("R/impact.barplot.myMod"))
+source(here::here("R/extend.vector"))
+
+# Format data
+
+
+pooled_results_df <- data.frame()
+
+
+# maybe instead of by oro type, make edge weight proportional to agreement/consensus...
+# only simulate if deployment is present
+
+  
+sig_te_edges <- TE_results %>%
+  filter(TE_pval <= 0.05, TE_XCauseY == TRUE,!is.na(TE_ratio)) %>%
+  select(From=NodeX, To=NodeY) %>%
+  mutate(
+    Type = "P"
+  )
+
+sig_te_edges <- sig_te_edges[!duplicated(sig_te_edges),]
+
+sig_nodes <- as.character(unique(c(sig_te_edges$From, sig_te_edges$To)))
+
+sig_te_edges <- sig_te_edges %>%
+  mutate(
+    From = factor(From, levels = sig_nodes),
+    To = factor(To, levels=sig_nodes),
+    Type = factor(Type, levels = c("N","P","U","Z")),
+    Group = 0
+  )
+
+# Identify pairs
+pairNodes <- sig_te_edges[!apply(sig_te_edges[,1:2], 1, is.unsorted), 1:2]
+pairs <- rep(NA, length(nrow(sig_te_edges)))
+for(p in 1:nrow(pairNodes)){
+  for(i in 1:nrow(sig_te_edges)){
+    ispair <- sum(sig_te_edges[i,1:2] %in% pairNodes[p,])==2
+    if(ispair){
+      pairs[i] <- p
+    }else{
+      next
+    }
+  }
+}
+  
+sig_te_edges$Pair <- pairs  
+sig_te_edges$Pair[is.na(sig_te_edges$Pair)] <- seq(p+1, p+sum(is.na(sig_te_edges$Pair)))
+  
+
+
+# sig_te_edges$Pair <- 1:nrow(sig_te_edges) # need to fix this to find pairs?
+
+allEdgesLabels <- edge.labels(sig_te_edges) 
+
+# Mod <- retain.groups(sig_te_edges, groups=0) # all certain interactions
+Mod <- enforce.limitation(sig_te_edges) # enforce self-limiting effect
+
+ModSim <- system.simulate(100, Mod) # simulate
+
+# can I adjust the probability of selecting edges? 
+# but here all the uncertain edges are given the same weight.... 
+# need to figure out how to adjust this...maybe set a threshold?
+s <- community.sampler(edges)
+s$select(0.6)
+s$community()
+
+# Loop over interventions on each node → observe effect on "deployment"
+all_nodes <- sig_nodes[sig_nodes != "deployment"]
+# temp <- impact.table(ModSim)
+
+for (node in all_nodes) {
+  press <- c(1)
+  names(press) <- node
+
+  # Set evidence and query deployment
+  temp <- impact.barplot.myMod(ModSim,
+      perturb = press,
+      plot=FALSE, percentage = TRUE
+  )
+  temp <- as.data.frame(t(temp["deployment",]))
+  temp$oro_type <- oro
+  temp$Press_perturb <- node
+  
+  pooled_results_df <- pooled_results_df %>% bind_rows(temp)
+  
+}
+
+
+
+
+
+pooled_results_df %>% 
+  group_by(Press_perturb) %>%
+  summarise(
+    avg_pos = mean(Positive, na.rm=T)
+  )
+#   Press_perturb            avg_pos
+#   <chr>                      <dbl>
+# 1 legislation                  0  
+# 2 policy                      25  
+# 3 public interest             66.7
+# 4 public interest weighted    33.3
+# 5 public support              33.3
+# 6 publications                75 
+
+
+```
+
+
+
+
+# Changepoint sub-analysis
+
+For efficiency and CCS, Efficiency and MRE-Ocean, looks like change points in deployment time series -- what could have caused these increases? Could they be related to change points in other time series? While we cannot infer causality, we can say that these change points occur around the same time...
+
+To explore this, fit a Bayesian multiple change point model (adapted from Cahill et al. 2015, doi: 10.1088/1748-9326/10/8/084002 for different distributions depending on response variable: ZIP for legislation and policy documents, Poisson for deployments for CDR-OAE, number of publications and number of posts, and Gamma for other deployment metrics and number of weighted posts as they are non-negative continuous data). This model estimates the number of probable change points, and then for each change point the posterior distribution. 
+
+```{r changepoint analysis, eval=FALSE}
+
+# The oro types to analyse 
+oroTypes = c("CCS","Efficiency","MRE-Ocean","CDR-OAE")
+# The different time series components to analyse (e.g. deployment, legislation, policy, posts, etc)
+components <- unique(allComponentDat_model$component)
+
+# Jags initialization parameters
+jagsInits <- list(
+  # Maximum number of changepoints to look for
+  "K_max"=2,
+  # Time buffer for looking for change points. 
+  # i.e. don't find a change point at the first or last year
+  "cpmin"="jagsData$MINX+1", 
+  "cpmax"="jagsData$MAXX-1")
+
+# Compile all data into a list to iterate through
+dataList <- list()
+for(c in components){
+  dataList[[c]] <- allComponentDat_model %>% filter(oro_type %in% oroTypes, component == c)
+ 
+}
+
+# Compile all model inputs into a list to iterate through
+modelInputs <- list(
+  "data" = dataList,
+  "bugsModFiles" = list(
+    "deployment" = "R/bugs-models/GammaModMultCP",
+    "publications" = "R/bugs-models/PoissonModMultCP",
+    "policy" = "R/bugs-models/ZIPModMultCP",
+    "legislation" = "R/bugs-models/ZIPModMultCP",
+    "public interest" = "R/bugs-models/PoissonModMultCP",
+    "public interest weighted" = "R/bugs-models/GammaModMultCP",
+    "public support" = "R/bugs-models/GammaModMultCP"
+  ),
+  "jagsData" = list(jagsInits)[rep(1,length(components))]
+)
+
+
+
+## Loop through all oro types and time series (components) to run change point analysis
+cutpoint_results <- data.frame()
+cutpoint_densities <- data.frame()
+
+for(oro in oroTypes){
+  # oro = "CCS"
+  
+  for(i in 1:length(components)){
+    # i = 4
+      
+    print(paste(oro,":", components[i]))
+    
+    # get model to fit
+    modFile <- modelInputs$bugsModFiles[[components[i]]]
+    
+    # If OAE deployment, y is poisson not Gamma so change
+    if(components[i] == "deployment" & oro == "CDR-OAE"){
+      modFile <- "R/bugs-models/PoissonModMultCP"
+    }
+    
+    # Format data
+    jagsData <- modelInputs$jagsData[[i]]
+    myinits = list(.RNG.name = "base::Wichmann-Hill", .RNG.seed = 123)
+    dat <- modelInputs$data[[components[i]]][modelInputs$data[[components[i]]]$oro_type == oro,]
+    if(nrow(dat) < 5){
+      print("Insufficient data")
+      next
+    }
+    yearLims <- range(modelInputs$data[[i]][
+      modelInputs$data[[components[i]]]$oro_type == oro,"year"
+    ], na.rm=T)
+    
+    # Format specific inputs depending on the model
+    if(grepl("pubBinom", modFile)){ 
+      trialVar <- ifelse(grepl("ORO", modelInputs$y_variable[[i]]),
+                         "n_OC","total_posts")
+      successVar <- ifelse(grepl("ORO", modelInputs$y_variable[[i]]),
+                         "n_ORO","n_posts")
+      # if a proportion, only keep proportions of total values above 100 # modelInputs$y_variable[[i]] == "prop_ORO"
+      keepYears <- dat$year[dat$variable_name == trialVar & 100 < dat$y]
+      dat <- dat[dat$year %in% keepYears,]
+      dat <- dat %>% arrange(variable_name, year)
+      nTrial <- dat$y[dat$variable_name == trialVar]
+      jagsData$nTrial <- nTrial
+      jagsData$nSuccess <- dat$y[dat$variable_name == successVar]
+      # datCast <- reshape2::dcast(dat, ... ~ variable_name, value.var = "y")
+    }
+    
+    if(grepl("ZIP", modFile)){ 
+      # if the model is zero inflated poisson, 
+      # Fill missing years with 0 values
+      dat <- dat %>% tidyr::complete(year = yearLims[1]:yearLims[2])
+      dat$y[is.na(dat$y)] <- 0
+      dat <- dat %>% tidyr::fill(component, oro_type, variable_name)
+      # add the latent binomial indicator, as to whether there are no documents at all
+      myinits$w <- dat$y
+      myinits$w[myinits$w > 0] <- 1
+      
+    }
+    
+    if(grepl("Poisson", modFile)){ 
+      # Fill missing years with 0 values
+      dat <- dat %>% tidyr::complete(year = yearLims[1]:yearLims[2])
+      dat$y[is.na(dat$y)] <- 0
+      dat$y <- round(dat$y) # force discrete y values
+      dat <- dat %>% tidyr::fill(component, oro_type, variable_name)
+      
+    }
+    
+    if(grepl("Gamma", modFile)){
+      # Fill missing years with 0 values
+      dat <- dat %>% tidyr::complete(year = yearLims[1]:yearLims[2])
+      dat$y[is.na(dat$y)] <- 0
+      dat <- dat %>% tidyr::fill(component, oro_type, variable_name)
+    }
+    
+    # make sure no NAs
+    dat <- na.omit(dat)
+    
+    # Skip if after subsetting data there is insufficient data points
+    if(nrow(dat) < 5){
+      print("Insufficient data after subsetting")
+      next
+    }
+    #with(dat, plot(year, y))
+    
+    jagsData$y <- dat$y
+    jagsData$x <- dat$year
+    jagsData$MINX <- min(jagsData$x)
+    jagsData$MAXX <- max(jagsData$x)
+    jagsData$cpmin <- eval(parse(text = jagsData$cpmin))
+    jagsData$cpmax <- eval(parse(text = jagsData$cpmax))
+    
+    if((jagsData$cpmax-jagsData$cpmin)<5){
+      jagsData$cpmin <- jagsData$MINX
+      jagsData$cpmax <- jagsData$MAXX
+    }
+    
+    
+    
+    ## Fit mdel
+    bugs.model <- readChar(modFile, file.info(modFile)$size)
+    
+    jagsModel <- tryCatch(
+      {
+        rjags::jags.model(
+          file = textConnection(bugs.model),
+          data = jagsData,
+          inits = myinits,
+          n.chains = 3,
+          n.adapt = 1500,
+          quiet = FALSE
+        )
+        },
+     error = function(e){
+       return(NULL)
+     }
+    )
+    if(is.null(jagsModel)){
+      next
+    }
+    
+    
+    update(jagsModel, 1000) # burnin
+    s = rjags::coda.samples(
+          model = jagsModel,
+          variable.names = c("alpha","beta","K","x_cp","z","pk"),
+          n.iter = 1000,
+          quiet = FALSE
+        )
+    
+    qs <- summary(s)$quantile
+    # qs
+    # plot(s[,"pk[2]"]) # check mixing
+    
+    # Subset to only the change points that are likely 
+    # And if there are likely change points, only those that indicate a positive change
+    K <- round(quantile(qs["K",], 0.5))
+    if(grepl("ZIP", modFile)){
+      K <- sum(0.5 <= qs[grepl("pk", rownames(qs)),"50%"])
+    }
+    
+    if(K == 0){
+      print("No significant change points")
+      next
+    }else{
+      pk <- qs[grep("pk", rownames(qs)),"50%"] # probability for each change point
+      x_cp <- qs[grep("x_cp", rownames(qs)),"50%"] # locations of each change point
+      # arrange in order of decreasing probability to find the most K probable
+      pkIndKeep <- order(pk, decreasing=T) 
+      pkIndKeep <- pkIndKeep[1:K] 
+      # then re-arrange in chronological order for calculating trends of segments
+      pkIndKeep <- sort(pkIndKeep) 
+      
+      # Find which change points mark a positive change in trend
+      trends <- vector("numeric", K+1) # store the trend for each segment
+      starts <- c(min(jagsData$x), round(x_cp[pkIndKeep])) 
+      ends <- c(round(x_cp[pkIndKeep]), max(jagsData$x))
+      for(k in 1:(K+1)){
+        if(grepl("Binom", modFile)){
+          trends[k] <- jagsData$y[which.min(abs(jagsData$x-ends[k]))] - jagsData$y[which.min(abs(jagsData$x-starts[k]))]
+        }else if(grepl("ZIP|Pois|Gamma", modFile)){
+          trends[k] <- sum(jagsData$y[which.min(abs(jagsData$x-starts[k])):which.min(abs(jagsData$x-ends[k]))] )
+        }
+        
+      }
+      # only keep the positive changes in trends
+      pkIndKeep <- pkIndKeep[which(0 < diff(trends))] 
+      
+      if(length(pkIndKeep) == 0){
+        print("no changepoints marking increasing trend")
+        next
+      }else{
+        pkIndNames <- names(x_cp[pkIndKeep])
+        
+        # If there are two cut points within 3 years of each other, 
+        # keep most probable one 
+        if(1 < length(pkIndKeep)){
+          if(diff(qs[pkIndNames,"50%"]) < 3){
+            pkIndNames <- pkIndNames[1]
+          }
+        }
+        
+        # save probability density of the cut points for plotting
+        calc_density <- function(vals){
+          dens <- density(vals, n=100)
+          return(data.frame("year"=dens$x, "cp_density"=dens$y))
+        }
+        densTemp <- do.call(rbind, s)
+        densTemp <- as.matrix(densTemp[,pkIndNames], ncol=length(pkIndNames))
+        densTemp <- do.call(rbind.data.frame, apply(densTemp, 2, function(x) calc_density(x)))
+        densTemp$cp_id <- rep(pkIndNames, 100)[sort(rep(1:length(pkIndNames),100))]
+        
+        
+        # Save summary of quantiles
+        dfTemp <- do.call(rbind, apply(qs[pkIndNames,,drop=FALSE], 1, function(x) as.data.frame(x)))
+        dfTemp$quantile = rep(colnames(qs), length(pkIndNames))
+        dfTemp$cp_id <- rep(pkIndNames, 5)[sort(rep(1:length(pkIndNames),5))] #rep(1:length(pkIndNames), 5) %>% sort
+        rownames(dfTemp) <- NULL
+        # Cap the distribution of cutpoints at the hard limits of the data
+        colnames(dfTemp)[which(colnames(dfTemp) == "x")] <- "year"
+        dfTemp$year <- ifelse(dfTemp$year < yearLims[1], yearLims[1], dfTemp$year)
+        dfTemp$year <- ifelse(yearLims[2] < dfTemp$year, yearLims[2], dfTemp$year)
+        # Add id variables
+        addIdVariables <- function(df){
+          df %>% mutate(
+                        oro_type = oro,
+                        component = dat$component[1],
+                        variable_name = dat$variable_name[1])
+        }
+        dfTemp <- addIdVariables(dfTemp)
+        densTemp <- addIdVariables(densTemp)
+        
+        ## Bind data to results
+        cutpoint_results <- rbind(cutpoint_results, dfTemp)
+        cutpoint_densities <- rbind(cutpoint_densities, densTemp)
+        # remove jags model
+        rm(jagsModel)
+      }
+    }
+
+      
+
+  } # end looping through ORO types
+} # end looping through bugs models
+
+
+
+## Save results
+# save(cutpoint_results,cutpoint_densities, file=here::here("outputs/cutpointResults_mitigation.RData"))
+```
+
+
+CP attribution - if a deployment cutpoint is identified what other cutpoints happened within -4 years + 2 years?
+```{r CP attribution}
+# Load data from previous chunk
+load(here::here("outputs/cutpointResults_mitigation.RData"))
+
+oroTypes <- unique(cutpoint_results$oro_type)
+
+attrCP_summary <- data.frame()
+for(oro in oroTypes){
+  depCP <- cutpoint_results %>%
+    filter(component == "deployment", oro_type == oro, quantile == "50%")
+  
+  # For each deployment cutpoint, which other cutpoints ocurred within pm 2 years?
+  for(cpid in unique(depCP$cp_id)){
+    targetYear <- depCP$year[depCP$cp_id == cpid]
+    attrCPs <- cutpoint_results %>%
+      filter(component != "deployment", oro_type == oro, quantile == "50%",
+             cp_id == cpid,
+             year <= targetYear+2 & targetYear-4 <= year)
+    
+    attrCP_summary <- attrCP_summary %>%
+      bind_rows(attrCPs)
+    
+  }
+  
+}
+
+# View(cutpoint_results)
+print(attrCP_summary)
+
+
+
+```
+
+
+When big changes happen, they co-occur with change in legislation and public interest/support...
+
+```{r plot of cutpoints}
+
+yBackTransform <- function(value, ogRange, newRange){
+  b <- diff(newRange) / diff(ogRange)
+  a <- newRange[1] - b * ogRange[1]
+  return(a + b * value)
+}
+  
+
+# Get raw data to plot
+cpDeployPlotData <- data.frame()
+cpDensityPlotData <- data.frame()
+yAxisBreaks <- data.frame()
+for(oro in unique(attrCP_summary$oro_type)){
+  
+  rawDat <- allComponentDat_model %>% 
+    filter(oro_type == oro, component == "deployment") %>%
+    mutate(y_scale = scales::rescale(y, c(0,1), na.rm=T)) %>%
+    mutate(
+      label = paste(
+        scales::number(y, accuracy =1, scale_cut = append(scales::cut_long_scale(), 1, 1), 
+                       big.mark = ".", decimal.mark = ",")
+      )
+    )
+  ogRange <- range(rawDat$y, na.rm=T)
+  newRange <- c(0,1)
+  ogBreaks <- pretty(ogRange, n = 4)
+  newBreaks <- yBackTransform(ogBreaks, ogRange, newRange)
+  if(1 < ogRange[2]){
+    ybl <- scales::number(ogBreaks, accuracy =1, scale_cut = append(scales::cut_long_scale(), 1, 1), 
+                       big.mark = ",", decimal.mark = ".")
+  }else{
+    ybl <- scales::number(ogBreaks, accuracy =0.001, scale_cut = append(scales::cut_short_scale(), 1, 1), 
+                       big.mark = ",", decimal.mark = ".")
+  }
+  
+  yAxisBreaks <- yAxisBreaks %>%
+    bind_rows(
+      data.frame(
+        y_breaks = ogBreaks,
+        y_breaks_label = ybl,
+        y_scale_breaks = newBreaks,
+        oro_type = oro,
+        component = "deployment"
+      )
+    )
+  
+  cpDens <- cutpoint_densities %>%
+    filter(component == "deployment") %>%
+    mutate(cp_group = paste(oro, component, cp_id)) %>%
+    group_by(cp_group) %>%
+    mutate(
+      cp_density = scales::rescale(cp_density, to=c(0,1))
+    )
+  
+  cpDeployPlotData <- cpDeployPlotData %>% bind_rows(rawDat)
+  cpDensityPlotData <- cpDensityPlotData %>% bind_rows(cpDens)
+ 
+}
+
+stripLabsDF <- cpDeployPlotData %>%
+  distinct(oro_type, variable_name) %>%
+  mutate(
+    labels = paste(oro_type, variable_name, sep="\n")
+  )
+stripLabs <- stripLabsDF$labels
+names(stripLabs) <-stripLabsDF$oro_type
+
+
+changePoint_ggp <- ggplot()+
+  geom_ribbon(data = cpDensityPlotData, 
+       aes(x=.data$year, ymax=.data$cp_density, ymin=0, group=.data$cp_group), 
+       fill = "lightgrey", alpha = 0.5)+ # , ymin=-Inf, 
+  geom_text(data = yAxisBreaks,
+            aes(x=-Inf, y=.data$y_scale_breaks, label = .data$y_breaks_label),
+            size = 3, col = "black", hjust = 1, vjust=0)+
+  geom_vline(data = attrCP_summary, 
+             aes(xintercept=.data$year, col = .data$component, group = .data$cp_id), 
+             linewidth = 1.5)+
+  # geom_rect(data = cutpoint_results %>% 
+  #            filter(paste(cp_id, oro_type, component) %in% with(attrCP_summary, paste(cp_id, oro_type, component))) %>%
+  #            reshape2::dcast(...~quantile, value.var = "year"),
+  #         aes(xmin = `25%`, xmax=`75%`, group=cp_id, fill = component), ymin=-Inf, ymax=Inf, alpha=0.5,
+  #         inherit.aes = FALSE)+
+  geom_line(data = cpDeployPlotData, 
+            aes(x=.data$year, y=.data$y_scale),
+            col = "black", linewidth = 1)+
+  scale_y_continuous(
+    breaks = NULL, #pretty_breaks(n = 4),
+    name = ""
+  )+
+  scale_x_continuous(name = "Year")+
+  
+  # Color scales
+ scale_color_manual(name="Median change-point",
+                  breaks = c("legislation","public interest","public interest weighted","public support" ),
+                  labels =c("Legislation","Public interest\n(N Posts)","Public interest (w)\n(N posts weighted)","Public support\n(N positive posts weighted)"),
+                  values = c("#7570b3","#1b9e77","#d95f02","#e78ac3")
+                  )+
+  # scale_fill_manual(name="Time series dataset",
+  #                 breaks = c("legislation","public interest","public interest weighted","public support" ),
+  #                 labels =c("Legislation","N Posts","N posts (weighted)","Public support"),
+  #                 values = c("#7570b3","#1b9e77","#d95f02","#e78ac3")
+  #                 )+
+  guides(color = guide_legend(nrow = 2))+
+
+  facet_wrap(vars(oro_type), ncol=1, labeller = labeller(oro_type = stripLabs))+
+  coord_cartesian(clip = "off")+
+  theme_minimal()+
+  theme(
+    axis.text.y = element_blank(),
+    plot.margin = unit(c(0.5,1,1,1.5), units = "cm"),
+    legend.position = "bottom"
+  )
+
+changePoint_ggp
+
+# ggsave(
+#   here::here("figures/main/changePointTimeSeries.pdf"),
+#   width = 7, height=8, units='in'
+# )
+```
+
+
+
+
+

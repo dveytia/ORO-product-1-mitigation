@@ -1,0 +1,66 @@
+model {
+  
+  # resources: 
+  # changepoint model: https://github.com/andrewcparnell/jags_examples/blob/master/R%20Code/jags_changepoint.R
+  # Multiple change points, see file Rcode_CPA.R from https://iopscience.iop.org/article/10.1088/1748-9326/10/8/084002/data
+  
+  
+  ## This models proportion of ORO publications as a binomial variable with multiple possible changepoints
+  # Notation:
+  # y(i) = response variable observated at x[i]. 
+  # x_cp[k] = x value of change point k, k = 1, .., K - K is the number of change points
+  # alpha = intercept term - possibly varyiing
+  # beta[k] = slope value for period k
+  
+  # Likelihood:
+  # Top level likelihood is always:
+  # y(x) ~ Poisson(lambda[x])
+  # then for multiple change points
+  # log(lambda[i]) = alpha + beta[k] * (x - x_cp[k]) if x < x_cp[k], or log(mu[i]) = alpha + beta[k+1] * (x - x_cp[k]) if x>=x_cp[k]
+  # Note that it means that alpha is the mean of y at the change point
+  
+  # To achieve this kind of model in jags we use the step function which works via:
+  # step(x) = 1 if x>0 or 0 otherwise.
+  # We can use it to pick out which side of the change point(s) we're on
+  
+  
+  
+  #### Likelihood
+  
+  for(i in 1:length(x)){
+    y[i] ~ dpois(lambda[i])
+    log(lambda[i]) <- alpha + inprod(beta[1:K_max], X[i, 1:K_max]) # poisson component with change points
+  }
+  
+  # Construct regressors with step functions for each potential change point
+  for (k in 1:K_max) {
+    for (i in 1:length(x)) {
+      X[i, k] <- z[k] * step(x[i] - x_cp[k]) * (x[i] - x_cp[k])
+    }
+  }
+    
+  
+  ### Priors 
+  alpha ~ dnorm(0, 1/(10)^2) # Poisson intercept
+  beta[1] ~ dnorm(0, 1/(10)^2) # Poisson slope segment 1
+  
+  # Poisson slopes for each k segment
+  for (k in 1:K_max) {
+    beta[k+1] ~ dnorm(0, 1/(10)^2)
+    x_cp[k] ~ dunif(cpmin, cpmax)
+    # Prior favoring small p (and thus fewer change points)
+    pk[k] ~ dbeta(2, 2)  # probability of changepoint existence - beta shape is symmetrical and has no penalty for higher values of k
+    z[k] ~ dbern(pk[k])  # 0 or 1 indicator of inclusion
+  }
+  
+  
+  # Calculate number of active change points
+  K <- sum(z[])
+
+  
+  
+}
+  
+  
+
+  

@@ -1,0 +1,14 @@
+# when running the simulations it is not necessary to constantly print out barplot
+# make a version of the function that just returns the proportions
+extend.vector <- function(named,nodes,default) {
+  if(is.null(names(named)))
+    v <- rep(named,length.out=length(nodes))
+  else {
+    k <- match(names(named),nodes)
+    if(any(is.na(k)))
+      warning("Unknown nodes:",paste(names(named)[is.na(k)],collapse=" "))
+    v <- rep(default,length(nodes))
+    v[k] <- named
+  }
+  v
+}
