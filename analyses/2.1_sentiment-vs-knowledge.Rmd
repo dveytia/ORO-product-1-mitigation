@@ -60,35 +60,253 @@ response variable: y
 
 load(here::here("data", "derived-data", "mitigationORO_pubs.RData")) #pubs
 # load(here::here("data", "derived-data", "mitigationORO_pubsProp.RData"))
-load(here::here("data", "derived-data", "n_nonBindPolicy_docs.RData")) # legDat
-load(here::here("data", "derived-data", "n_legislation_docs.RData")) # polDat
 load(here::here("data/derived-data/mitigationDeployDat.RData")) # allDeployDat
 load(here::here("data/derived-data/mitigationPostsDat.RData")) # postsDat
 
 year_lim <- c(2000, 2024)
 
+## Predictions for coded variables: oro type, pred_outcome_effectiveness, pred_outcome_quantitative, pred_primary_research
 
-# bind all data together
-allComponentDat_model <- pubs %>%
-  bind_rows(polDat) %>%
-  bind_rows(legDat) %>%
-  bind_rows(allDeployDat) %>%
-  bind_rows(postsDat) %>%
-  mutate(
-    component = replace(component, component == "non-binding policy", "policy"),
-    # y = scale(y, center=TRUE, scale=TRUE)
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+
+uniquerefs <- tbl(p1_db, "uniquerefs_update2025") %>%
+  select(analysis_id, year)
+
+predOroType <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+  filter(0.5 <= mean_prediction) %>%
+  rename(oro_type = level) %>%
+  select(analysis_id, oro_type) %>%
+  left_join(uniquerefs, by = "analysis_id") %>%
+  collect()
+
+pred_effective <- tbl(p1_db, "pred_outcome_effectiveness")%>% 
+  filter(0.5 <= mean_prediction) %>%
+  rename(effective_mean_pred = mean_prediction) %>%
+  select(analysis_id, effective_mean_pred)%>% 
+  collect()
+
+pred_quant <- tbl(p1_db, "pred_outcome_quantitative")%>% 
+  filter(0.5 <= mean_prediction) %>%
+  rename(quantitative_mean_pred = mean_prediction) %>%
+  select(analysis_id, quantitative_mean_pred)%>% 
+  collect()
+
+pred_primary <- tbl(p1_db, "pred_primary_research") %>% 
+  filter(0.5 <= mean_prediction) %>%
+  rename(primary_mean_pred = mean_prediction) %>%
+  select(analysis_id, primary_mean_pred)%>% 
+  collect()
+
+DBI::dbDisconnect(p1_db)
+
+metadata_df <- predOroType %>%
+  left_join(pred_primary) %>%
+  left_join(pred_quant) %>%
+  left_join(pred_effective) %>%
+  mutate(across(contains("mean_pred"), function(x) ifelse(x < 0.5 | is.na(x), FALSE, TRUE)),
+         year = as.numeric(year)
+         ) 
+
+# metadata_year_df <- metadata_df %>%
+#   filter(!is.na(year))%>%
+#   group_by(oro_type, year) %>%
+#   distinct(analysis_id, oro_type, year, .keep_all = TRUE) %>%
+#   summarise(
+#     n_primary = sum(primary_mean_pred, na.rm=T),
+#     n_quantitative = sum(quantitative_mean_pred, na.rm=T),
+#     n_effective = sum(effective_mean_pred, na.rm=T)
+#   )
+# 
+# metadata_year_df_long <- melt(metadata_year_df, id.vars = c("oro_type", "year"))
+
+```
+
+
+```{r quick plot of outcome types for oro research vs posts sentiments}
+
+## Format data for plotting
+
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+error_bars <- tbl(p1_db, "pred_primary_research") %>% 
+  rename(primary_mean_pred = mean_prediction, primary_std_pred = std_prediction) %>%
+  select(analysis_id, primary_mean_pred, primary_std_pred)%>% 
+  filter(!is.na(primary_mean_pred), !is.na(primary_std_pred)) %>% 
+  collect() %>%
+  right_join(predOroType, by = "analysis_id") %>%
+  group_by(oro_type) %>%
+  summarise(
+    n_mean = n_distinct(analysis_id[0.5 <= primary_mean_pred]),
+    n_lower = n_distinct(analysis_id[0.5 <= (primary_mean_pred - primary_std_pred)]),
+    n_upper = n_distinct(analysis_id[0.5 <= (primary_mean_pred + primary_std_pred)])
   ) %>%
-  filter(year_lim[1] <= year & year <= year_lim[2])
+  mutate(
+    metric = "N articles",
+    oro_type = gsub("[.]","-", oro_type)
+  )
 
-summary(allComponentDat_model)
-unique(allComponentDat_model$oro_type)
+DBI::dbDisconnect(p1_db)
+
+
+
+dist_counts <- metadata_df %>%
+  filter(primary_mean_pred==TRUE) %>%
+  group_by(oro_type) %>%
+  summarise(
+    # n_articles = n_distinct(analysis_id[primary_mean_pred != TRUE & quantitative_mean_pred != TRUE & effective_mean_pred != TRUE]),
+    n_primary = n_distinct(analysis_id[primary_mean_pred == TRUE & quantitative_mean_pred != TRUE & effective_mean_pred != TRUE]),
+    n_quant = n_distinct(analysis_id[primary_mean_pred == TRUE & quantitative_mean_pred == TRUE & effective_mean_pred != TRUE]),
+    n_effective = n_distinct(analysis_id[primary_mean_pred == TRUE & quantitative_mean_pred == TRUE & effective_mean_pred == TRUE]),
+    .groups = "drop"
+  ) %>%
+  group_by(oro_type) %>%
+  mutate(
+    prop_primary = n_primary / sum(n_primary, n_quant, n_effective)*100,
+    prop_quant = n_quant / sum(n_primary, n_quant, n_effective)*100,
+    prop_effective = n_effective / sum(n_primary, n_quant, n_effective)*100
+  )%>%
+  
+  pivot_longer(cols = starts_with(c("n_","prop_")), names_to = "prediction_type", values_to = "value") %>%
+  mutate(
+    metric = case_when(
+      grepl("n_",prediction_type) ~ "N articles",
+      TRUE ~ "% articles"
+    )
+    ) %>%
+  mutate(
+    prediction_type = factor(gsub(".*_","", prediction_type), levels = c("primary", "quant", "effective"),
+                             labels = c("Primary - Other", "Quantitative - Other", "Quantitative Effectiveness")),
+    oro_type = gsub("[.]","-", oro_type)
+  )
+
+
+
+
+posts_counts <- postsDat %>%
+  group_by(oro_type) %>%
+  summarise(
+    n_posts = sum(y[variable_name == "N posts (query and like-weighted)"]),
+    n_positive = sum(y[variable_name == "N positive posts (query and like-weighted)"]),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    percent_positive = n_positive / n_posts*100
+    # percent_posts = (n_posts-n_positive) / n_posts*100
+  ) %>%
+  select(-n_posts) %>%
+ 
+  pivot_longer(cols = starts_with(c("n_","percent_")), names_to = "metric_type", values_to = "value") %>%
+  mutate(
+    metric = case_when(
+      grepl("n_",metric_type) ~ "N positive posts",
+      TRUE ~ "% positive posts"
+    )
+    ) %>%
+  mutate(
+    # post_type = factor(gsub(".*_","", metric_type), levels = c("posts", "positive"),
+    #                          labels = c("Other", "Positive")),
+    oro_type = gsub("[.]","-", oro_type)
+  )
+
+
+
+# Plot
+
+outcomes_ggp <- ggplot(dist_counts, aes(x = oro_type, y = value, fill = prediction_type)) +
+  facet_wrap(vars(metric), scales = "free_y")+
+  geom_col(position = "stack") +
+  geom_errorbar(data = error_bars, aes(x = oro_type, ymin = n_lower, ymax = n_upper),
+                width = .2,
+                inherit.aes = FALSE)+
+  labs(
+    x = "Oro type",
+    fill = "Outcome type"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+    )
+
+
+
+
+posts_ggp <- ggplot(posts_counts, aes(x = oro_type, y = value)) + #fill = post_type
+  facet_wrap(vars(metric), scales = "free_y")+
+  geom_col(position = "stack") +
+  labs(
+    x = "Oro type",
+    fill = "Sentiment type"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+    )
+
+```
+
+
+```{r combine outcomes and post exploratory plots}
+library(cowplot)
+
+plot_grid(outcomes_ggp, posts_ggp, ncol = 1,align = "hv")
+```
+
+```{r}
+
+# What to do about posts for MRE-General and CDR-General? 
+
+outcomes_df <- dist_counts %>%
+    filter(metric == "N articles") %>%
+    pivot_wider(id_cols = "oro_type", names_from = "prediction_type", values_from = value) %>%
+  ungroup()%>%
+  add_row(oro_type = c("CDR-General", "MRE-General"))
+
+cdr_sum <- outcomes_df %>%
+  filter(grepl("CDR", oro_type)) %>%
+  summarise(across(where(is.numeric), ~ sum(.x, na.rm = TRUE)))
+
+outcomes_df[outcomes_df$oro_type == "CDR-General",2:4] <- cdr_sum
+
+mre_sum <- outcomes_df %>%
+  filter(grepl("MRE", oro_type)) %>%
+  summarise(across(where(is.numeric), ~ sum(.x, na.rm = TRUE)))
+
+outcomes_df[outcomes_df$oro_type == "MRE-General",2:4] <- mre_sum
+
+
+outcome_post_df <- posts_counts %>%
+  pivot_wider(id_cols = "oro_type", names_from = "metric", values_from = value) %>%
+  left_join(
+    outcomes_df,
+    by = "oro_type"
+  ) %>%
+  select(-`% positive posts`)
+
+outcome_post_df_long <- melt(outcome_post_df, id.vars = c("oro_type","N positive posts"))
+
+
+
+ggplot(outcome_post_df_long %>% filter(!is.na(value)), aes(x=log(value), y=log(`N positive posts`)))+
+  # ggrepel::geom_text_repel(aes(label = oro_type))+
+  geom_text(aes(label = oro_type), size=3)+
+  geom_smooth(method='lm')+
+  labs(x = "log(N articles)", y = "log(N positive posts)")+
+  facet_wrap(vars(variable), scales = "free")+
+  expand_limits(x = c(1,12))+
+  theme_minimal()
+
 ```
 
 
 
-# ORO type predictions and other coded variables -- readiness??
 
-
-# Mismatches: Compare sentiment vs N publications?
 
 

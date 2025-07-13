@@ -1579,6 +1579,8 @@ for(oro in oroTypes){
 ```
 
 
+
+
 CP attribution - if a deployment cutpoint is identified what other cutpoints happened within -4 years + 2 years?
 ```{r CP attribution}
 # Load data from previous chunk
