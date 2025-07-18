@@ -621,7 +621,7 @@ ggplot(allDeployDat, aes(year, y, col=oro_type))+
     legend.position = "none"
   )
 
-ggsave(here::here("figures/supplemental/mitigationDeploymentIndicators.pdf"), width = 7, height=6)
+
 
 save(allDeployDat, file=here::here("data/derived-data/mitigationDeployDat.RData"))
 
@@ -631,20 +631,27 @@ save(allDeployDat, file=here::here("data/derived-data/mitigationDeployDat.RData"
 # N Posts
 
 ```{r}
-postsDat <- read.csv(here::here("outputs/sentiment_predictions/sentiment_summary_oro_year.csv"))
+postsDat <- read.csv(here::here("outputs/sentiment_predictions/sentiment_summary_oro_year.csv"))%>%
+  mutate(
+    weighted_ratio_pn = weighted_positive/weighted_negative,
+    prop_positive = weighted_positive/n_posts_like_weighted
+  ) %>%
+  select(oro_type, year, n_posts_qry_weighted, n_posts_like_weighted, 
+         weighted_positive, weighted_negative, weighted_ratio_pn, prop_positive)
 
-
-postsDat <- reshape2::melt(postsDat[,c("oro_type","year", "n_posts_qry_weighted","n_posts_weighted","weighted_positive")],
+postsDat <- reshape2::melt(postsDat,
                            id.vars = c("oro_type","year"),
-                           measure.vars = c("n_posts_qry_weighted","n_posts_weighted","weighted_positive"),
                            variable.name = "variable_name",
                            value.name = "y")
 postsDat <- postsDat %>%
   mutate(
     variable_name = case_when(
       variable_name=="n_posts_qry_weighted" ~ "N posts (query-weighted)",
-      variable_name=="n_posts_weighted" ~ "N posts (query and like-weighted)",
+      variable_name=="n_posts_like_weighted" ~ "N posts (query and like-weighted)",
       variable_name=="weighted_positive"~"N positive posts (query and like-weighted)",
+      variable_name=="weighted_negative"~"N negative posts (query and like-weighted)",
+      variable_name=="prop_positive"~"Proportion positive posts",
+      variable_name=="weighted_ratio_pn"~"Ratio positive:negative posts",
       TRUE ~ "other"
       )) %>%
   mutate(
@@ -652,6 +659,9 @@ postsDat <- postsDat %>%
       variable_name=="N posts (query-weighted)" ~ "public interest",
       variable_name=="N posts (query and like-weighted)" ~ "public interest weighted",
       variable_name=="N positive posts (query and like-weighted)"~"public support",
+      variable_name=="N negative posts (query and like-weighted)"~"public opposition",
+      variable_name=="Proportion positive posts"~"public support (relative)",
+      variable_name=="Ratio positive:negative posts"~"public support agreement",
       TRUE ~ "other"
       ),
     oro_type = gsub("_","-", toupper(oro_type))
@@ -670,7 +680,7 @@ postsDat <- postsDat %>%
   ) %>%
   filter(variable_name != "other", oro_type != "CDR-CULT") 
 
-head(postsDat)
+
 unique(postsDat$component)
 unique(postsDat$oro_type)
 
