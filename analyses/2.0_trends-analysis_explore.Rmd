@@ -212,6 +212,7 @@ outcomes_ggp <- ggplot(outcome_df_bars_long,
   geom_errorbar(data = outcome_error, aes(x = oro_type, ymin = n_lower, ymax = n_upper),
                 width = .2,
                 inherit.aes = FALSE)+
+  scale_fill_brewer(type = "qual")+
   guides(fill=guide_legend(nrow=4))+
   labs(
     x = "ORO type",
@@ -238,7 +239,7 @@ write.csv(outcome_error %>%
 DBI::dbDisconnect(p1_db)
 ```
 
-## Publication trends
+
 
 What was driving the inflection in the mitigation ORO branch? A particular ORO or a particular affiliation?
 
@@ -346,6 +347,22 @@ ggsave(
 )
 
 ```
+
+
+```{r outcome type barplot vs oro timeseries  plots}
+require(ggpubr)
+
+ggarrange(plotlist = list(outcomes_ggp, oroTimeseries_ggp),
+          nrow=1, labels = letters[1:2], align = "v", widths = c(1,1.7)) %>%
+  ggexport(
+    filename = here::here("figures/supplemental/oro_outcome_and_timeseries.pdf"),
+    width = 8, height = 5
+  )
+```
+
+
+## Investigate drivers of timeseries inflection
+
 
 Do an area plot of the proportional contribution of different affiliations?
 
@@ -532,6 +549,11 @@ countryProp_ggp <- ggplot(
   scale_x_continuous(limits = c(1980,2024))+
   scale_fill_brewer(type = "qual")+
   guides(fill = guide_legend(nrow=3))+
+  labs(
+    x="Year",
+    y = "Proportion of total publications",
+    fill = "Country"
+  )+
   theme_minimal()+
   theme(
     legend.position = "bottom"
@@ -556,11 +578,16 @@ mreO_countryProp_ggp <- ggplot(
   geom_col(position = "stack", aes(y=prop, fill = country))+
   geom_line(data = oroPub01%>%
     filter(oro_type == "MRE-Ocean"),
-            aes(y=log_y_mean_01), col="yellow")+
+            aes(y=log_y_mean_01), col="#00f3ff")+
   scale_x_continuous(limits = c(1980,2024))+
   guides(fill = guide_legend(nrow=3))+
   scale_fill_brewer(type = "qual")+
-  theme_minimal()+
+  labs(
+    x="Year",
+    y = "Proportion of total publications",
+    fill = "Country"
+  )+
+  theme_minimal(base_size = 10)+
   theme(
     legend.position = "bottom"
   )
@@ -582,11 +609,33 @@ oro_year_count_long %>%
   View()
 
 # looks like brazil went from 0 to 82 publications...
-oro_year_count_long %>%
+brazilPub_ggp <- oro_year_count_long %>%
     filter(oro_type == "MRE-Ocean", country_unique == "Brazil")%>%
-  ggplot(aes(year, count))+
+  ggplot(aes(year, log(count)))+
   geom_line()+
-  theme_minimal()
+  scale_y_continuous(
+    name = "log(N publications)",
+    sec.axis = sec_axis( transform=~exp(.), name="N publications")
+  ) +
+  labs(
+    x = "Year"
+    # y = "Brazil affiliated publications (N)"
+  )+
+  theme_minimal(base_size = 10)
+brazilPub_ggp
+
+
+ggarrange(
+  plotlist = list(mreO_countryProp_ggp, brazilPub_ggp),
+  labels = paste0(letters[1:2], ")"), 
+  label.x = 0, vjust =1.2, font.label = list(size = 10),
+  
+  align = "h"
+)  %>%
+  ggpubr::ggexport(filename = here::here("figures/supplemental/MRE_brazil_drivers.pdf"),
+                   nrow = 1, 
+           width = 7, height= 4)
+
 
 
 ```
@@ -595,16 +644,6 @@ oro_year_count_long %>%
 
 ## Combine ORO publication distribution plots
 
-```{r combine distribution plots}
-require(ggpubr)
-
-ggarrange(plotlist = list(outcomes_ggp, oroTimeseries_ggp),
-          nrow=1, labels = letters[1:2], align = "v", widths = c(1,1.7)) %>%
-  ggexport(
-    filename = here::here("figures/supplemental/oro_outcome_and_timeseries.pdf"),
-    width = 7, height = 5
-  )
-```
 
 
 # Correlation analysis (non-temporal)
@@ -765,6 +804,16 @@ for(c in 1:length(components)){
 }
 
 modelResults <- do.call("bind_rows", modelResults)
+modelResults$family <- family_lookup$family[match(modelResults$component, family_lookup$component)]
+modelResults$component <- componentAES$label[match(modelResults$component, componentAES$level)]
+
+
+## save
+
+write.csv(
+  modelResults,
+  here::here("outputs/publications_otherDim_glmResults.csv")
+)
 
 ggpubr::ggarrange(
   plotlist = ggps,
@@ -777,6 +826,24 @@ ggpubr::ggarrange(
                    ncol = 3, 
            width = 10, height= 10)
 
+
+```
+
+```{r plot only a subset of the correlations for a main figure?}
+
+selectedComponents <- c("policy","legislation","public interest","public support")
+
+
+ggpubr::ggarrange(
+  plotlist = ggps[names(ggps) %in% selectedComponents],
+  labels = paste0(letters[1:length(selectedComponents)],") ", componentAES$label[match(selectedComponents, componentAES$level)]),
+  label.x = 0, vjust =1.2, font.label = list(size = 10),
+  align = "hv"
+  
+)%>%
+  ggpubr::ggexport(filename = here::here("figures/main/selectedGlmFitPlots.pdf"),
+                   ncol = 2, 
+           width = 7, height= 5.5)
 
 ```
 
@@ -819,6 +886,10 @@ nodes <- unique(allComponentDat_model$component)
 edges <- expand.grid(nodes, nodes)
 # edges <- edges[!apply(edges, 1, is.unsorted), ] # if order doesn't matter? if causality is tested in both directions...
 edges <- edges[edges[,1] != edges[,2],]
+
+# remove edge pairs whose calculations are inter-related (all the public metrics)
+publicEdges <- grepl("public", edges[,1]) & grepl("public", edges[,2])
+edges <- edges[!publicEdges,]
 
 
 
@@ -1073,9 +1144,12 @@ clusters <- cluster_walktrap(meta_graph)
 # node colour ~ cluster
 E(meta_graph)$weight <- meta_links$avg_ratio
 E(meta_graph)$color <- scales::alpha("black", meta_links$relative_nsig)
+E(meta_graph)$width <- log1p(E(meta_graph)$weight) * 1.5
+V(meta_graph)$color <- clusters$membership
+
 
 svg(file = here::here("figures/supplemental/meta_TE_network_diagraph.svg"),width = 8, height = 8)
-plot(meta_graph, edge.width = log1p(E(meta_graph)$weight) * 1.5,vertex.color = clusters$membership)
+plot(meta_graph)
 dev.off()
 
 ```
@@ -1091,23 +1165,147 @@ Use network centrality metrics:
 🧠 Why:
 Identifies "driver" vs "responder" nodes across domains.
 ```{r node importance and influence}
-# causal influencers
-degree(meta_graph, mode = "out") %>% sort(decreasing = T)   
-# public support   public interest weighted             publications
+# causal influencers - legislation, policy
+influencers <- degree(meta_graph, mode = "out") %>% 
+  sort(decreasing = T) %>% 
+  as.data.frame() %>%
+  tibble::rownames_to_column("component") %>%
+  mutate(metric = "Out-degree (N effects given)")
+  
+# causal responders - deployment - 8
+responders <- degree(meta_graph, mode = "in") %>% 
+  sort(decreasing = T) %>% 
+  as.data.frame() %>%
+  tibble::rownames_to_column("component") %>%
+  mutate(metric = "In-degree (N effects received)")
 
-# causal responders
-degree(meta_graph, mode = "in") %>% sort(decreasing = T)   
-# public interest weighted           public support               deployment
 
-# general influence
-sort(eigen_centrality(meta_graph)$vector, decreasing =TRUE)  
-# public interest public interest weighted              legislation
+# general influence - legislation                    policy           public interest
+eigenvalues <- sort(eigen_centrality(meta_graph)$vector, decreasing =TRUE)  %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("component") %>%
+  mutate(metric = "Eigenvector centrality")
 
-# mediators
-sort(betweenness(meta_graph), decreasing=TRUE)
-# deployment           public support             publications
+# mediators - deployment - 14
+mediators <- sort(betweenness(meta_graph), decreasing=TRUE)%>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("component") %>%
+  mutate(metric = "Betweenness (N shortest paths)")
+
+
+## format results and save
+
+metaNetCentralityMetrics <- rbind(
+  influencers,
+  responders,
+  eigenvalues,
+  mediators
+)%>%
+  mutate(
+    component = factor(
+      component, 
+      levels = componentAES$level,
+      labels = componentAES$label
+    )
+  )
+colnames(metaNetCentralityMetrics)[2] <- "Value"
+
+
+## Save results
+metaNetCentralityMetricsSummary <- metaNetCentralityMetrics %>% 
+  group_by(metric) %>% 
+  slice_max(n=3,order_by = Value) 
+
+write.csv(
+  metaNetCentralityMetricsSummary,
+  file = here::here("outputs/metaNetworkMetrics_summary.csv")
+)
+  
+write.csv(
+  metaNetCentralityMetrics,
+  file = here::here("outputs/metaNetworkMetrics_all.csv")
+)
+
 
 ```
+
+```{r plot meta graph network and metric heatmap}
+
+plot_ggraph_meta_network <- function(g, plotTitle=NULL, titleSize = 10, nodeTextSize = 3) {
+  g_tidy <- as_tbl_graph(g)
+  
+  
+  gg <- ggraph(g_tidy, layout = "circle") +  # You can try "kk" or "circle" or "fr" for spacing
+    geom_edge_link(aes(width = 1/log1p(weight), alpha = relative_nsig),
+                   arrow = arrow(length = unit(5, 'mm')),
+                   color = "black", show.legend = FALSE) +
+    # geom_node_point(size = 6, aes(color = as.factor(color))) +
+    geom_node_point(size = 7, aes(color = name))+
+    # scale_color_brewer(type = "qual", guide="none")+
+    scale_color_manual(values = componentAES$colour,
+                       breaks = componentAES$level, 
+                       guide="none")+
+    geom_node_label(aes(label = componentAES$label[match(name, componentAES$level)]), repel = TRUE, #nudge_x=0.1, nudge_y = 0.1
+                   size = nodeTextSize, alpha=0.8
+                   ) +
+    theme_void() +
+    theme(
+      plot.margin = unit(c(5,5,5,5), units = "mm")
+      )
+  if(!is.null(plotTitle)){
+    gg <- gg + labs(title = paste(plotTitle)) +
+      theme(
+        plot.title = element_text(size = titleSize, hjust = 0.5)
+      )
+  }
+  return(gg)
+}
+
+metaNetwork_ggp <- plot_ggraph_meta_network(
+  meta_graph,nodeTextSize = 3.5
+)
+
+
+## combine plot
+networkMetrics_ggp <- ggplot(
+  data = metaNetCentralityMetrics %>%
+    group_by(metric) %>%
+    mutate(
+      Value_scaled = scales::rescale(Value, to = c(0,1))
+    ),
+  aes(x=component, y=metric)
+)+
+  geom_tile(aes(fill = Value_scaled))+
+  scale_y_discrete(
+    labels = function(x) stringr::str_wrap(x, width=15)
+  )+
+  scale_fill_distiller(palette = "Blues", direction=1)+
+  labs(
+    x = "",
+    y="Network metric",
+    fill = "Metric\n(scaled)"
+  )+
+  theme_minimal(base_size = 12)+
+  theme(
+    axis.text.x = element_text(angle = 45, hjust=1)
+    # legend.position = "bottom"
+  )
+networkMetrics_ggp
+
+ggarrange(plotlist = list(metaNetwork_ggp, networkMetrics_ggp),
+          labels = paste0(letters[1:2], ")"), 
+          label.x = 0, vjust =1.2, font.label = list(size = 13)
+)  %>%
+  ggpubr::ggexport(filename = here::here("figures/supplemental/metaNetwork_Graph_and_MetricHeatmap.pdf"),
+                   nrow = 1, 
+           width = 10, height= 4.5)
+
+
+```
+
+
+
+
 
 
 
@@ -1276,48 +1474,7 @@ for (k in 1:n_clusters) {
 
 
 
-## Rough plotting routine -- better one in next chunk
 
-require(grid)
-require(gridExtra)
-require(png)
-
-# Function to plot a graph with a title
-capture_plot_as_raster <- function(g, k) {
-  # Create a temporary PNG file
-  tmpfile <- tempfile(fileext = ".png")
-  
-  # Open PNG device
-  png(tmpfile, width = 800, height = 800, res = 150)
-  
-  # Base plot (to file)
-  plot(g,
-       main = paste(cluster_names[[k]]),
-       edge.arrow.size = 0.4,
-       # edge.label = E(g)$label,
-       edge.color = "black",
-       vertex.label.cex = 1,
-       layout = layout_with_fr(g))
-  
-  dev.off()
-  
-  # Read and convert to rasterGrob
-  img <- readPNG(tmpfile)
-  file.remove(tmpfile)
-  rasterGrob(img, interpolate = TRUE)
-}
-
-
-# Capture each plot
-plots <- lapply(1:n_clusters, function(k) capture_plot_as_raster(meta_graphs[[k]], k))
-
-
-# Arrange all plots
-pdf(here::here("figures/supplemental/cluter_level_networks.pdf"),
-    width = 10, height = 10)
-gridExtra::grid.arrange(grobs = plots, ncol = 2)
-
-dev.off()
 ```
 
 ```{r plot cluster level networks as ggplot plotted with dendogram}
@@ -1470,18 +1627,9 @@ for (k in 1:n_clusters) {
 ## Plot the networks of the oro types
 
 
-nodeTextSize <- 3
-titleSize <- 10
+nodeTextSize <- 3.5
+titleSize <- 12
 
-nodeColPal <- c(
-  "publications"="#377eb8",
-  "policy"="#984ea3",
-  "legislation"="#984ea3",
-  "public interest"="#ff7f00",
-  "public interest weighted"="#ff7f00",
-  "public support"="#ff7f00",
-  "deployment"="#e41a1c"
-)
 
 # Convert network to ggplot
 plot_ggraph_network <- function(g, cluster_id, cluster_label) {
@@ -1492,10 +1640,16 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label) {
                    arrow = arrow(length = unit(5, 'mm')),
                    color = "black", show.legend = FALSE) +
     geom_node_point(size = 6, aes(color = name)) +
-    scale_color_manual(values = nodeColPal, guide="none")+
-    geom_node_label(aes(label = name), repel = TRUE, #nudge_x=0.1, nudge_y = 0.1
+    scale_color_manual(values = componentAES$colour,
+                       breaks = componentAES$level, 
+                       guide="none")+
+    geom_node_label(aes(label = componentAES$label[match(name, componentAES$level)]), repel = TRUE,
                    size = nodeTextSize, alpha=0.8
                    ) +
+    # scale_color_manual(values = nodeColPal, guide="none")+
+    # geom_node_label(aes(label = name), repel = TRUE, #nudge_x=0.1, nudge_y = 0.1
+    #                size = nodeTextSize, alpha=0.8
+    #                ) +
     labs(title = paste(cluster_label)) +
     theme_void() +
     theme(
@@ -1545,7 +1699,7 @@ Let the model estimate edge strengths (conditional probabilities or regression w
 Statistically grounded way to model uncertainty and dependencies beyond pairwise effects.
 
 Try 1 : baysean network. But I'm not convinced
-```{r build graphical model - Baysean network}
+```{r build graphical model - Baysean network, eval = FALSE}
 
 library(bnlearn)
 library(dplyr)
@@ -1714,7 +1868,8 @@ summary(cfDeltas) # does'nt work, all the deltas are 0
 
 ```
 
-```{r build qualitative network model for each oro}
+Try 2: try at each oro level -- not convinced either because at a smaller scale some edges may not be detected. Could get a better representation of the network if we pool results...
+```{r build qualitative network model for each oro, eval=FALSE}
 # remotes::install_github("SWotherspoon/QPress")
 library(QPress)
 library(reshape2)
@@ -1830,6 +1985,7 @@ ggsave(
 ```
 
 
+Try 3: pool networks by oro type conceptually.
 But from the conceptual cluster networks, only CDR and MRE groups have deployment in the network. SO look at these clusters
 ```{r build qualitative network model for CDR and MRE conceptual clusters}
 # remotes::install_github("SWotherspoon/QPress")
@@ -1877,7 +2033,7 @@ for (k in 1:n_clusters) {
   
   
   sig_te_edges <- TE_results %>%
-    filter(TE_pval <= 0.05, TE_XCauseY == TRUE,!is.na(TE_ratio), oro_type %in% types_in_cluster) %>%
+    filter(TE_XCauseY == TRUE,!is.na(TE_ratio), oro_type %in% types_in_cluster) %>%
     group_by(NodeX, NodeY) %>%
     summarise(
       n_sig = n(),
@@ -1966,12 +2122,21 @@ qp_concept_cluster_results_df %>%
 
 # Plot results
 # For each ORO type
+uniquePP <- unique(qp_concept_cluster_results_df$Press_perturb)
 
 ggplot(qp_concept_cluster_results_df %>% filter(Positive>0), 
        aes(x=Press_perturb, y=stringr::str_wrap(cluster, width=10), fill = Positive))+
   geom_tile()+
-  scale_fill_stepsn(name = stringr::str_wrap("Positive effect on deployment (% sims)", width=25), n.breaks=5, colours = viridis(5))+
-  labs(y="ORO type cluster",x="Press perturbation")+
+  scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=1, colours = viridis(5))+
+  scale_x_discrete(
+    breaks = componentAES$level[
+      componentAES$level %in% uniquePP
+    ],
+    labels = componentAES$label[
+      componentAES$level %in% uniquePP
+    ]
+  )+
+  labs(y="ORO group",x="Press perturbation")+
   theme_bw()+
   theme(
     legend.position = "bottom",
@@ -1985,6 +2150,144 @@ ggsave(
 )
 ```
 
+
+Try 4: build qualitative model of meta network
+```{r build qualitative network model for the meta network -- all oros}
+# remotes::install_github("SWotherspoon/QPress")
+library(QPress)
+library(reshape2)
+nSims <- 5000
+
+source(here::here("R/impact.barplot.myMod"))
+source(here::here("R/extend.vector"))
+source(here::here("R/my.QPress.R"))
+
+addTaskCallback(function(...) {set.seed(123);TRUE})
+
+# Format data
+weightSimulation = FALSE
+uncertainThreshold = 1 # the threshold of agreement below which the edge is sample with a probability weight of 0.5
+oroTypes <- unique(allComponentDat_model$oro_type)
+qp_results_df <- data.frame()
+
+
+
+
+
+
+# maybe instead of by oro type, make edge weight proportional to agreement/consensus...
+# only simulate if deployment is present
+
+  
+  sig_te_edges <- TE_results %>%
+    filter(TE_XCauseY == TRUE,!is.na(TE_ratio)) %>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      n_sig = n(),
+      .groups = 'drop'
+    )%>%
+    mutate(
+      Probability = n_sig / max(n_sig),
+      Group = ifelse(uncertainThreshold <= Probability,0,1)
+    ) %>%
+    arrange(desc(Probability)) %>%
+    select(From=NodeX, To=NodeY, Group, Probability) %>%
+    mutate(
+      Type = "P"
+    )
+  
+  
+  sig_nodes <- as.character(unique(c(sig_te_edges$From, sig_te_edges$To)))
+  
+  
+  sig_te_edges <- sig_te_edges %>%
+    mutate(
+      From = factor(From, levels = sig_nodes),
+      To = factor(To, levels=sig_nodes),
+      Type = factor(Type, levels = c("N","P","U","Z")),
+      # Group = factor(Group)
+    )
+  sig_te_edges$Pair <- 1:nrow(sig_te_edges)
+  
+  allEdgesLabels <- edge.labels(sig_te_edges) 
+  
+  # Mod <- retain.groups(sig_te_edges, groups=0) # all certain interactions
+  Mod <- enforce.limitation(sig_te_edges%>% select(-Probability)) # enforce self-limiting effect
+  # s<- community.sampler(Mod)
+  # s$select(0.5)
+  # ModSim <- system.simulate(100, Mod,sampler = s) # simulate
+  # print(impact.table(ModSim))
+  
+  if(weightSimulation){
+    uncertainSampleProbsDf <- sig_te_edges %>%
+    filter(Group == 1) %>%
+    select(Pair, Probability) %>%
+    distinct(Pair,.keep_all = TRUE)
+  
+    ModSim <- my.system.simulate(nSims, Mod,required.groups = c(0), uncertainSampleProbsDf=uncertainSampleProbsDf)
+  }else{
+    ModSim <- system.simulate(100, Mod)
+  }
+  
+  # Loop over interventions on each node → observe effect on "deployment"
+  all_nodes <- sig_nodes[sig_nodes != "deployment"]
+  # temp <- impact.table(ModSim)
+
+  for (node in all_nodes) {
+    press <- c(1)
+    names(press) <- node
+
+    # Set evidence and query deployment
+    temp <- impact.barplot.myMod(ModSim,
+        perturb = press,
+        plot=FALSE, percentage = TRUE
+    )
+    temp <- as.data.frame(t(temp["deployment",]))
+    temp$cluster <- "Meta-network"
+    temp$Press_perturb <- node
+    
+    qp_results_df <- qp_results_df %>% bind_rows(temp)
+    
+  }
+
+ 
+
+
+
+
+
+# Plot results
+# For each ORO type
+uniquePP <- unique(qp_results_df$Press_perturb)
+
+ggplot(qp_results_df %>% filter(Positive>0), 
+       aes(x=Press_perturb, y=stringr::str_wrap(cluster, width=10), fill = Positive))+
+  geom_tile()+
+  scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=5, colours = viridis(5))+
+  # scale_fill_steps2(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=4,midpoint = 50)+
+  scale_x_discrete(
+    breaks = componentAES$level[
+      componentAES$level %in% uniquePP
+    ],
+    labels = componentAES$label[
+      componentAES$level %in% uniquePP
+    ]
+  )+
+  labs(y="Meta-network",x="Press perturbation")+
+  theme_bw()+
+  theme(
+    legend.position = "bottom",
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.text.x=element_text(angle=45, hjust=1)
+  )
+
+
+ggsave(
+  here::here("figures/supplemental/qp_metaNetwork_heatmap.pdf"),
+  width=5, height=4, units="in"
+)
+```
 
 
 
