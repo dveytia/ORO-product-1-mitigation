@@ -642,7 +642,6 @@ ggarrange(
 
 
 
-## Combine ORO publication distribution plots
 
 
 
@@ -844,6 +843,219 @@ ggpubr::ggarrange(
   ggpubr::ggexport(filename = here::here("figures/main/selectedGlmFitPlots.pdf"),
                    ncol = 2, 
            width = 7, height= 5.5)
+
+```
+
+
+# Segway to TE -- Visualize timeseries of all components
+
+```{r plot multiplanel alluvial}
+# don't plot all components in the alluvial -- it would be too much
+alluvialComponents <- c("publications","deployment",selectedComponents)
+
+# scale deployment data
+allDeployDat_scale <- allComponentDat_model %>%
+  filter(component == "deployment", !is.na(year)) %>%
+  arrange(oro_type, year) %>%
+  group_by(oro_type) %>%
+  mutate(
+    # y=cut(
+    #   scales::rescale(y, to=c(0,1)),
+    #   breaks = seq(0,1, by = 0.1),
+    #   labels = seq(0.1,1, by = 0.1)
+    #   ) %>% as.numeric()# if i do 0,1 it throws an error
+    y = scales::rescale(y, to=c(0,1))
+  ) %>%
+  ungroup() 
+  
+
+## plot all together
+
+allComponentDat_scale <- allComponentDat_model %>%
+  filter(component != "deployment") %>%
+  bind_rows(allDeployDat_scale) %>%
+  filter(component %in% alluvialComponents) %>%
+  mutate(
+    component = factor(component, 
+                       levels = componentAES$level[
+                         componentAES$level %in% alluvialComponents
+                       ], 
+                       labels = componentAES$label[
+                         componentAES$level %in% alluvialComponents
+                       ]),
+    log_y = log(y)
+  )
+
+
+
+allComponentAlluvial <- ggplot(allComponentDat_scale, 
+                               aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type))+
+  # geom_alluvium(alpha = 0.8, decreasing=FALSE)+
+  geom_alluvium(alpha = 0.8, curve_type = "sigmoid", decreasing=FALSE) +
+  labs(y="",x="Year")+
+  facet_grid(component~., scales = "free_y", switch="y")+
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  scale_colour_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  # scale_x_continuous(limits = c(1980,2022))+
+  guides(color = guide_legend(nrow = 3), fill = guide_legend(nrow = 3))+
+  theme_bw()+
+  theme(
+    legend.position = "bottom", 
+    strip.placement = "outside",
+    legend.title = element_blank()
+    )
+allComponentAlluvial
+
+## try on log scale?
+allDeployDat_scale <- allComponentDat_model %>%
+  filter(component == "deployment", !is.na(year)) %>%
+  arrange(oro_type, year) %>%
+  group_by(oro_type) %>%
+  mutate(
+    y=cut(
+      scales::rescale(y, to=c(0,1)),
+      breaks = seq(0,1, by = 0.1),
+      labels = seq(0.1,1, by = 0.1)
+      ) %>% as.numeric()# if i do 0,1 it throws an error
+    # y = scales::rescale(y, to=c(0,1))
+  ) %>%
+  ungroup() 
+  
+
+## plot all together
+componentAES <- componentAES %>%
+  mutate(
+    labelUnits = case_when(
+      grepl("Pub|Pol|Leg", label) ~ paste(label, "(N)", sep="\n"),
+      grepl("Inter|Support|Opposition", label) ~ paste(label, "(N posts\nweighted)", sep="\n"),
+      TRUE ~ paste(label,"(various\nmetrics)", sep="\n")
+    )
+  )
+
+allComponentDat_scale <- allComponentDat_model %>%
+  filter(component != "deployment") %>%
+  bind_rows(allDeployDat_scale) %>%
+  filter(component %in% alluvialComponents) %>%
+  mutate(
+    component = factor(component, 
+                       levels = componentAES$level[
+                         componentAES$level %in% alluvialComponents
+                       ], 
+                       labels = componentAES$labelUnits[
+                         componentAES$level %in% alluvialComponents
+                       ]),
+    log_y = log(y)
+  )
+
+
+
+ybreaks = pretty(allComponentDat_scale$log_y)
+ybreaks = seq(
+  from=min(allComponentDat_scale$log_y[!is.infinite(allComponentDat_scale$log_y)], na.rm=T),
+  to=max(allComponentDat_scale$log_y[!is.infinite(allComponentDat_scale$log_y)], na.rm=T),
+  by = 0.1
+)
+allComponentAlluvial_log <- ggplot(allComponentDat_scale %>% 
+                                     mutate(
+                                       y= cut(log_y,
+                                              breaks = ybreaks, 
+                                              labels = ybreaks[-1]
+                                              ) %>% as.numeric()
+                                     ), 
+                                   aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type))+
+  # geom_alluvium(alpha = 0.8, decreasing=FALSE)+
+  geom_alluvium(alpha = 0.8, curve_type = "sigmoid", decreasing=FALSE) +
+  labs(y="log(Metric)",x="Year")+
+  facet_grid(component~., scales = "free_y"
+             # labeller = label_wrap_gen(width=25)
+             )+ #switch="y"
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  scale_colour_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  # scale_x_continuous(limits = c(1980,2022))+
+  # guides(color = guide_legend(nrow = 4), fill = guide_legend(nrow = 3))+
+  guides(color = guide_legend(ncol = 1), fill = guide_legend(ncol = 1))+
+  theme_bw()+
+  theme(
+    legend.position = "right", 
+    strip.placement = "outside"
+    # legend.title = element_blank()
+    )
+
+
+
+ggsave(
+  plot = allComponentAlluvial_log, 
+  filename = here::here("figures/main/componentAlluvial_log.pdf"),
+  width=6, height=6, units="in"
+    )
+```
+
+
+```{r supplement of all alluvial components}
+
+## plot all together
+componentAES <- componentAES %>%
+  mutate(
+    labelUnits = case_when(
+      grepl("Pub|Pol|Leg", label) ~ paste(label, "(N)", sep="\n"),
+      grepl("Inter|Support|Opposition", label) ~ paste(label, "(N posts\nweighted)", sep="\n"),
+      TRUE ~ paste(label,"(various\nmetrics)", sep="\n")
+    )
+  )
+
+allComponentDat_scale2 <- allComponentDat_model %>%
+  filter(component != "deployment") %>%
+  bind_rows(allDeployDat_scale) %>%
+  mutate(
+    component = factor(component, 
+                       levels = componentAES$level, 
+                       labels = componentAES$labelUnits),
+    log_y = log(y)
+  )
+
+
+
+ybreaks = pretty(allComponentDat_scale2$log_y)
+ybreaks = seq(
+  from=min(allComponentDat_scale2$log_y[!is.infinite(allComponentDat_scale2$log_y)], na.rm=T),
+  to=max(allComponentDat_scale2$log_y[!is.infinite(allComponentDat_scale2$log_y)], na.rm=T),
+  by = 0.1
+)
+allComponentAlluvial_log2 <- ggplot(allComponentDat_scale2 %>% 
+                                    filter(!is.na(log_y), !is.na(component)) %>%
+                                     mutate(
+                                       y= cut(log_y,
+                                              breaks = ybreaks, 
+                                              labels = ybreaks[-1]
+                                              ) %>% as.numeric()
+                                     ), 
+                                   aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type))+
+  # geom_alluvium(alpha = 0.8, decreasing=FALSE)+
+  geom_alluvium(alpha = 0.8, curve_type = "sigmoid", decreasing=FALSE) +
+  labs(y="log(Metric)",x="Year")+
+  facet_grid(component~., scales = "free_y"
+             # labeller = label_wrap_gen(width=25)
+             )+ #switch="y"
+  scale_fill_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  scale_colour_manual(name = "ORO type",values = typeAES$colour, breaks = typeAES$level, labels = typeAES$label)+
+  # scale_x_continuous(limits = c(1980,2022))+
+  # guides(color = guide_legend(nrow = 4), fill = guide_legend(nrow = 3))+
+  guides(color = guide_legend(ncol = 1), fill = guide_legend(ncol = 1))+
+  theme_bw()+
+  theme(
+    legend.position = "right", 
+    strip.placement = "outside"
+    # legend.title = element_blank()
+    )
+
+
+allComponentAlluvial_log2
+
+ggsave(
+  plot = allComponentAlluvial_log2, 
+  filename = here::here("figures/supplemental/all_componentAlluvial_log.pdf"),
+  width=6, height=10, units="in"
+    )
 
 ```
 

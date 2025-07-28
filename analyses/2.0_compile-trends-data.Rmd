@@ -631,12 +631,14 @@ save(allDeployDat, file=here::here("data/derived-data/mitigationDeployDat.RData"
 # N Posts
 
 ```{r}
+# before i was using n_posts_like_weighted instead of n_posts_weighted (qry + like)
+
 postsDat <- read.csv(here::here("outputs/sentiment_predictions/sentiment_summary_oro_year.csv"))%>%
   mutate(
     weighted_ratio_pn = weighted_positive/weighted_negative,
-    prop_positive = weighted_positive/n_posts_like_weighted
+    prop_positive = weighted_positive/n_posts_weighted
   ) %>%
-  select(oro_type, year, n_posts_qry_weighted, n_posts_like_weighted, 
+  select(oro_type, year, n_posts_qry_weighted, n_posts_weighted, 
          weighted_positive, weighted_negative, weighted_ratio_pn, prop_positive)
 
 postsDat <- reshape2::melt(postsDat,
@@ -647,7 +649,7 @@ postsDat <- postsDat %>%
   mutate(
     variable_name = case_when(
       variable_name=="n_posts_qry_weighted" ~ "N posts (query-weighted)",
-      variable_name=="n_posts_like_weighted" ~ "N posts (query and like-weighted)",
+      variable_name=="n_posts_weighted" ~ "N posts (query and like-weighted)",
       variable_name=="weighted_positive"~"N positive posts (query and like-weighted)",
       variable_name=="weighted_negative"~"N negative posts (query and like-weighted)",
       variable_name=="prop_positive"~"Proportion positive posts",
