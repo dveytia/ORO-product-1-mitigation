@@ -1,5 +1,5 @@
 ---
-title: "2.0_compile-trends-data"
+title: "2.0_trends-analysis_explore"
 author: "Devi Veytia"
 date: "2025-07-08"
 output: html_document
@@ -46,32 +46,48 @@ componentAES <- componentAES[order(componentAES$order),]
 ```
 
 
+# Introduction
+
+Entry point: The distribution of and extent of scientific evidence, and its temporal variation, varies according to the type of ocean-related option (ORO) (Veytia et al, In review). 
+
+Aim: This work is a hypothesis generating exercise, which asks: What are the possible drivers of this variability? What are the socio-political antecedents of breakpoints/inflections? Over time, is variability in scientific evidence linked to policy, public interest and action? What does this tell us about the research/policy/action cycle?
 
 
 
-## Load data
+This aim will be addressed in two parts:
+
+Part 1: Narrative synthesis. 
+Here we qualitatively explore break points in publication #s, as well as action/implementation, and discuss possible drivers of these changes.
+
+Part 2: Quantitative synthesis.
+
+2.1 - Match/mis-match. Do the most evidenced OROs appear most frequently in policy and public interest metrics?
+2.2 - Network analysis. Do we find evidence for causal links between the different nodes of the research/policy/action cycle? If so, what does this tell us about the pathways towards implementing OROs?
+
+
+
+
+
+# Load data
 
 Data structure:
-list with each level is 
+list where each level is 
 - data frame for publications: 
 - data frame for n policy documents
 - data frame for deployment
 
-id variables: oro_type, component (publication, policy, deployment), variable_name,
-response variable: y
+each data frame has the following id variables: oro_type, component (publication, policy, deployment, etc), variable_name,
+each data frame has the following response variable: y
 
 ```{r load data}
 
 load(here::here("data", "derived-data", "mitigationORO_pubs.RData")) #pubs
-# load(here::here("data", "derived-data", "mitigationORO_pubsProp.RData"))
 load(here::here("data", "derived-data", "n_nonBindPolicy_docs.RData")) # legDat
 load(here::here("data", "derived-data", "n_legislation_docs.RData")) # polDat
 load(here::here("data/derived-data/mitigationDeployDat.RData")) # allDeployDat
 load(here::here("data/derived-data/mitigationPostsDat.RData")) # postsDat
 
-year_lim <- c(2000, 2024)
-
-
+year_lim <- c(2000, 2024) # years to analyse
 
 
 # bind all data together
@@ -91,11 +107,15 @@ allComponentDat_model <- pubs %>%
 ```
 
 
-# Publications: Mapping extent and distribution of evidence
+# Entry point: The distribution of and extent of scientific evidence, and its temporal variation, varies according to the type of ocean-related option (ORO) 
 
-## Distribution of publications
+*Key message*
+Mitigation ORO publication effort is weighted towards marine renewable energy (ocean, located). Over time, we observe varying rates of increase, with inflection points – notably in MRE-Ocean occurring in 2001. This inspired this analysis: What are the drivers of this inflection point? To go further, we complement our data set of # publications with # policy documents, # legislative documents, # social media posts, and # social media posts (positive sentiment)
 
-```{r barplot of n publications by outcome type}
+
+Skip the code and just run the chunk to visualize at the end
+
+```{r barplot of n publications by outcome type, eval = FALSE}
 
 p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
                       here::here("data","sqlite-databases","product1.sqlite"),
@@ -205,7 +225,6 @@ outcome_df_bars_long <- outcome_df_bars %>%
 
 
 # Plot
-
 outcomes_ggp <- ggplot(outcome_df_bars_long, 
                        aes(x = oro_type, y = value, fill = prediction_type)) +
   geom_col(position = "stack") +
@@ -242,9 +261,7 @@ DBI::dbDisconnect(p1_db)
 
 
 What was driving the inflection in the mitigation ORO branch? A particular ORO or a particular affiliation?
-
-Modify this to show uncertainty???
-```{r plot publication timeseries -- MRE-Ocean is driving inflection}
+```{r plot publication timeseries -- MRE-Ocean is driving inflection, eval = FALSE}
 
 p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
                       here::here("data","sqlite-databases","product1.sqlite"),
@@ -349,7 +366,7 @@ ggsave(
 ```
 
 
-```{r outcome type barplot vs oro timeseries  plots}
+```{r outcome type barplot vs oro timeseries  plots, eval = FALSE}
 require(ggpubr)
 
 ggarrange(plotlist = list(outcomes_ggp, oroTimeseries_ggp),
@@ -361,493 +378,23 @@ ggarrange(plotlist = list(outcomes_ggp, oroTimeseries_ggp),
 ```
 
 
-## Investigate drivers of timeseries inflection
+```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("Distribution of N publications (predicted relevant by LLM classifier)"), echo=FALSE}
 
-
-Do an area plot of the proportional contribution of different affiliations?
-
-```{r calculate all author affiliations for all relevant references, eval=FALSE}
-library(countrycode)
-library(tidyr)
-library(stringr)
-require(dbplyr)
-require(RSQLite)
-
-## connect to database
-p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
-                      here::here("data","sqlite-databases","product1.sqlite"),
-                                 create=FALSE)
-
-uniquerefs <- tbl(p1_db, "uniquerefs_update2025") %>%
-  select(analysis_id, year, affiliation)
-
-idCountry <- tbl(p1_db, "pred_oro_type_long") %>%
-  select(analysis_id) %>%
-  distinct(analysis_id) %>%
-  left_join(uniquerefs %>% select(analysis_id, year, affiliation), by = "analysis_id") %>%
-  collect()
-
-
-
-# Get a list of country names and codes
-load(here::here("data/derived-data/countries_ls.RData"))
-# countries_ls <- data.frame(name_en = countrycode::codelist$country.name.en) %>%
-#   mutate(country_iso = countrycode::countrycode(sourcevar   = name_en,
-#                                        origin      = "country.name",
-#                                        destination = "iso3c"),
-#          country=name_en)
-
-source(here::here("R", "extract_all_affiliation.R"))
-
-idCountry$countries <- extract_all_affiliation(idCountry$affiliation, countries_ls)
-
-dbWriteTable(conn=p1_db, 
-             name= "oro_id_allCountryAffil_lookup",
-             value=idCountry,
-             append=FALSE, 
-             overwrite = FALSE)
-
-
-dbDisconnect(p1_db)
-
-
+knitr::include_graphics(here::here("figures/supplemental/oro_outcome_and_timeseries.pdf"))
 ```
 
+## Complementary data
 
-```{r plot publication timeseries -- by affiliation}
+To contextualize our publication data, we have added the following metrics:
 
 
-p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
-                      here::here("data","sqlite-databases","product1.sqlite"),
-                                 create=FALSE)
+Number of policy and legislative documents - Calculated by web scraping ECOLEX & FAOLEX databases then keyword searching full document pdfs for keywords relevant for each type of ORO. Document type metadata used to determine legislation vs policy
 
-idCountry <- tbl(p1_db, "oro_id_allCountryAffil_lookup") %>%
-  select(analysis_id, countries, affiliation)%>%
-  collect()
+Interest - N posts returned from keyword searches (reddit, youtube, bluesky, linked in), weighted by # likes
 
-uniquerefs <- tbl(p1_db, "uniquerefs_update2025") %>%
-  select(analysis_id, year) 
+Support - N posts (from above) that are positive sentiment (predicted using a pre-trained sentiment classification LLM)
 
-predOroType <- tbl(p1_db, "pred_oro_type_mit_long") %>%
-  left_join(uniquerefs, by = "analysis_id") %>%
-  collect()%>%
-  left_join(idCountry, by="analysis_id")
-
-
-# predOroType <- tbl(p1_db, "pred_oro_type_mit_long") %>%
-#   collect()%>%
-#   left_join(idCountry, by = "analysis_id") 
-
-dbDisconnect(p1_db)
-
-
-## Calculate per oro type, the frequency of country affiliation per year
-# columns, analysis_id, oro_type, year, country, count
-
-
-uniqueCountries <- strsplit(idCountry$countries, " ; ") %>% unlist() %>% unique()
-
-affTypeTop10 <- strsplit(idCountry$countries, ", ") %>% unlist() %>% table %>% sort(decreasing = TRUE) %>% head(7) %>% names()
-
-# oro_year_count_long <- predOroType %>%
-#     filter(!(countries %in% affTypeTop10)) %>%
-#     group_by(level, year) %>%
-#     summarise(
-#       count = n_distinct(analysis_id)
-#     ) %>%
-#     mutate(
-#       country = "Other"
-#     )
-oro_year_count_long <- data.frame()
-
-for(country in uniqueCountries){
-  dfTemp <- predOroType %>%
-    filter(grepl(country, countries)) %>%
-    group_by(level, year) %>%
-    summarise(
-      count = n_distinct(analysis_id)
-    ) %>%
-    mutate(
-      country_unique = country
-    )
-  oro_year_count_long <- oro_year_count_long %>%
-    bind_rows(dfTemp)
-}
-
-oro_year_count_long <- oro_year_count_long %>%
-  mutate(
-    country = ifelse(country_unique %in% affTypeTop10, country_unique, "Other")
-  )
-
-totals <- oro_year_count_long %>%
-  group_by(level, year) %>%
-  summarise(
-    total = sum(count, na.rm=T)
-  )
-oro_year_count_long <- oro_year_count_long %>%
-  left_join(totals) %>%
-  mutate(
-    prop = count/total,
-    oro_type = factor(
-      gsub("[.]","-", level),
-      levels = typeAES$level,
-      labels = typeAES$label
-    ),
-    year = as.numeric(year)
-  )%>%
-  filter(
-    !is.na(year)
-  )%>%
-  filter(
-    1980 <= year, year <= 2024
-  )
-
-summary(oro_year_count_long)
-
-## Overlay a lineplot of the interannual trend
-oroPub01 <- predOroType %>%
-  mutate(
-    level = gsub("[.]","-", level),
-    year= as.numeric(year)
-    ) %>%
-  filter(!is.na(year)) %>%
-  filter(
-    1980 <= year, year <= 2024
-  )%>%
-  mutate(
-    lower_prediction = mean_prediction - std_prediction,
-    upper_prediction = mean_prediction + std_prediction
-  ) %>%
-  group_by(level, year) %>%
-  summarise(
-    y_mean = n_distinct(analysis_id[0.5 <= mean_prediction]),
-    y_lower = n_distinct(analysis_id[0.5 <= lower_prediction]),
-    y_upper = n_distinct(analysis_id[0.5 <= upper_prediction])
-  ) %>%
-  group_by(level) %>%
-  mutate(
-    log_y_mean_01 = scales::rescale(log(y_mean), to = c(0,1), na.rm=T),
-  ) %>%
-  ungroup()%>%
-  mutate(
-    oro_type = factor(
-      level,
-      levels = typeAES$level,
-      labels = typeAES$label
-    )
-  )
-
-
-countryProp_ggp <- ggplot(
-  data = oro_year_count_long,
-  aes(x=year)
-)+
-  geom_col(position = "stack", aes(y=prop, fill = country))+
-  geom_line(data = oroPub01,
-            aes(y=log_y_mean_01), col="#00f3ff")+
-  facet_wrap(vars(oro_type), ncol = 2, scales="free_x")+
-  scale_x_continuous(limits = c(1980,2024))+
-  scale_fill_brewer(type = "qual")+
-  guides(fill = guide_legend(nrow=3))+
-  labs(
-    x="Year",
-    y = "Proportion of total publications",
-    fill = "Country"
-  )+
-  theme_minimal()+
-  theme(
-    legend.position = "bottom"
-  )
-
-countryProp_ggp
-
-
-ggsave(
-  here::here("figures/supplemental/propCountAffilByOroYear.pdf"),
-  plot = countryProp_ggp,
-  width = 6, height=7
-)
-
-
-## zoom in on MRE-Ocean
-mreO_countryProp_ggp <- ggplot(
-  data = oro_year_count_long %>%
-    filter(oro_type == "MRE-Ocean"),
-  aes(x=year)
-)+
-  geom_col(position = "stack", aes(y=prop, fill = country))+
-  geom_line(data = oroPub01%>%
-    filter(oro_type == "MRE-Ocean"),
-            aes(y=log_y_mean_01), col="#00f3ff")+
-  scale_x_continuous(limits = c(1980,2024))+
-  guides(fill = guide_legend(nrow=3))+
-  scale_fill_brewer(type = "qual")+
-  labs(
-    x="Year",
-    y = "Proportion of total publications",
-    fill = "Country"
-  )+
-  theme_minimal(base_size = 10)+
-  theme(
-    legend.position = "bottom"
-  )
-
-mreO_countryProp_ggp
-
-
-# Which countries?
-
-oro_year_count_long %>%
-    filter(oro_type == "MRE-Ocean", year %in% c(2002,2003)) %>% 
-  pivot_wider(names_from = year, values_from = count, id_cols = c(country_unique))%>% 
-  replace_na(list(`2002`=0, `2003`=0))%>%
-  mutate(difference = (`2003`-`2002`)) %>%
-  arrange(desc(difference)) %>%
-  filter(!is.infinite(difference))%>%
-  select(country_unique, `2002`, `2003`, difference) %>%
-  filter(!(country_unique %in% affTypeTop10))%>%
-  View()
-
-# looks like brazil went from 0 to 82 publications...
-brazilPub_ggp <- oro_year_count_long %>%
-    filter(oro_type == "MRE-Ocean", country_unique == "Brazil")%>%
-  ggplot(aes(year, log(count)))+
-  geom_line()+
-  scale_y_continuous(
-    name = "log(N publications)",
-    sec.axis = sec_axis( transform=~exp(.), name="N publications")
-  ) +
-  labs(
-    x = "Year"
-    # y = "Brazil affiliated publications (N)"
-  )+
-  theme_minimal(base_size = 10)
-brazilPub_ggp
-
-
-ggarrange(
-  plotlist = list(mreO_countryProp_ggp, brazilPub_ggp),
-  labels = paste0(letters[1:2], ")"), 
-  label.x = 0, vjust =1.2, font.label = list(size = 10),
-  
-  align = "h"
-)  %>%
-  ggpubr::ggexport(filename = here::here("figures/supplemental/MRE_brazil_drivers.pdf"),
-                   nrow = 1, 
-           width = 7, height= 4)
-
-
-
-```
-
-
-
-
-
-
-# Correlation analysis (non-temporal)
-
-Because I'm summarizing across years and comparing oros between each other, cannot include deployment because all the metrics are on different scales
-
-MOdify to only look at primary research?
-```{r fit glm between publication and all other components}
-
-family_lookup <- allComponentDat_model %>% ungroup() %>% 
-  distinct(component) %>% 
-  select(component) %>%
-  filter(!(component %in% c("public opposition","publications","deployment"))) %>%
-  mutate(
-    family = case_when(
-      component %in% c("policy","legislation") ~ "poisson()",
-      component %in% c("public support (relative)","public support agreement") ~ "binomial()",
-      TRUE ~ "Gamma()"
-    )
-  )
-
-# keep each year as an indivdual data point or summarize across years? T
-# This is easier for counts because I can sum, but for things like proportion
-components <- unique(allComponentDat_model$component)
-components <- components[!(components %in% c("publications","deployment","public opposition"))]
-
-ggps <- vector("list", length(components))
-names(ggps) <- components
-modelResults <- vector("list", length(components))
-for(c in 1:length(components)){
-  
-  if(components[c] == "public support agreement"){
-    tmpDat <- allComponentDat_model %>%
-      filter(component %in% c("publications", "public support","public opposition")) %>%
-      group_by(oro_type, component) %>%
-      summarise(
-        y = sum(y, na.rm=T)
-      )%>%
-      mutate(y=round(y)) %>%
-      pivot_wider(names_from = component, values_from = y, id_cols = c(oro_type)) %>%
-      na.omit()
-    colnames(tmpDat) <- gsub(" ","_", colnames(tmpDat))
-    # tmpDat$publications <- scale(tmpDat$publications)[,1] ## ?scale?
-    
-    mod <- glm(cbind(public_support, public_opposition) ~ publications, 
-               data = tmpDat,
-               family = eval(parse(text = family_lookup$family[family_lookup$component == components[c]])))
-    
-    # get a variable on the response scale for plotting
-    tmpDat<- tmpDat %>%
-      mutate(
-        response_y = public_support/(public_opposition+public_support)
-      )
-  }
-  else if(components[c] == "public support (relative)"){
-    tmpDat <- allComponentDat_model %>%
-      filter(component %in% c("publications", "public support","public interest weighted")) %>%
-      group_by(oro_type, component) %>%
-      summarise(
-        y = sum(y, na.rm=T)
-      )%>%
-      mutate(y=round(y)) %>%
-      pivot_wider(names_from = component, values_from = y, id_cols = c(oro_type)) %>%
-      mutate(public_support_relative = `public support`/`public interest weighted`) %>%
-      na.omit()
-    colnames(tmpDat) <- gsub(" ","_", colnames(tmpDat))
-    # tmpDat$publications <- scale(tmpDat$publications)[,1] ## ?scale?
-    
-    mod <- glm(public_support_relative ~ publications, 
-               weights = tmpDat$public_interest_weighted,
-               data = tmpDat,
-               family = eval(parse(text = family_lookup$family[family_lookup$component == components[c]])))
-    # get a variable on the response scale for plotting
-    tmpDat<- tmpDat %>%
-      mutate(
-        response_y = public_support_relative
-      )
-    
-  }else{
-    tmpDat <- allComponentDat_model %>%
-      filter(component %in% c("publications", components[c])) %>%
-      group_by(oro_type, component) %>%
-      summarise(
-        y = sum(y, na.rm=T)
-      )%>%
-      pivot_wider(names_from = component, values_from = y, id_cols = c(oro_type)) %>%
-      na.omit()
-    colnames(tmpDat)[colnames(tmpDat) == components[c]] <- "y"
-    
-    if(family_lookup$family[family_lookup$component == components[c]] == "poisson()"){
-      tmpDat$y <- round(tmpDat$y)
-    }
-    
-    colnames(tmpDat) <- gsub(" ","_", colnames(tmpDat))
-    # tmpDat$publications <- scale(tmpDat$publications)[,1] ## ?scale?
-    
-    
-    mod <- glm(y ~ publications, 
-               data = tmpDat,
-               family = eval(parse(text = family_lookup$family[family_lookup$component == components[c]])))
-    # get a variable on the response scale for plotting
-    tmpDat<- tmpDat %>%
-      mutate(
-        response_y = y
-      )
-  }
-  
-
-    
-  ## Get model predictions
-  predDat <- data.frame(
-    publications = seq(from = min(tmpDat$publications), to = max(tmpDat$publications), length.out = 50)
-  )
-  preds <- predict(mod, newdata = predDat, se.fit = TRUE, type = "response")
-  predDat$mean_fit <- preds$fit
-  predDat$lower_fit <- preds$fit - preds$se.fit
-  predDat$upper_fit <- preds$fit + preds$se.fit
-    
-  ## store model results
-  modSummary <- summary(mod)
-  modSummary <- as.data.frame(t(modSummary$coefficients["publications",])) 
-  modSummary$component = components[c]
-  modelResults[[c]] <- modSummary
-  
-  
-  pval = data.frame(
-    label = paste(
-    "p-value <", ifelse(
-      modSummary[,grep("Pr", names(modSummary))] < 0.01, "0.01", 
-      (
-        signif(modSummary[,grep("Pr", names(modSummary))], digits=2)
-      ))
-  )
-  )
- 
-  
-  ## Plot 
-  ggps[[c]] <- ggplot()+
-    geom_ribbon(data = predDat, aes(x=publications, ymin = lower_fit, ymax = upper_fit), alpha = 0.5)+
-    geom_line(data = predDat, aes(x=publications, y=mean_fit), col="red")+
-    # geom_text(data = tmpDat, aes(x=publications, y = public_support/(public_opposition+public_support), label = oro_type))+
-    ggrepel::geom_text_repel(data = tmpDat, aes(x=publications, y = response_y, label = oro_type), force = 0.3,
-                             size=2.5)+ 
-    ggrepel::geom_text_repel(data = pval, aes(label = stringr::str_wrap(label, 8), fontface=3), 
-                             x=Inf, y=-Inf, hjust=1, vjust=0, col="red",
-                             size=2.5)+
-    labs(
-      x = "Publications (N)",
-      y = componentAES$label[componentAES$level == components[c]]
-    )+
-    theme_minimal()+
-    theme(
-      axis.title = element_text(size=10),
-      plot.margin = unit(c(0.7,0.3,0.3,0.3),"cm")
-    )
-
-  
-}
-
-modelResults <- do.call("bind_rows", modelResults)
-modelResults$family <- family_lookup$family[match(modelResults$component, family_lookup$component)]
-modelResults$component <- componentAES$label[match(modelResults$component, componentAES$level)]
-
-
-## save
-
-write.csv(
-  modelResults,
-  here::here("outputs/publications_otherDim_glmResults.csv")
-)
-
-ggpubr::ggarrange(
-  plotlist = ggps,
-  labels = paste0(letters[1:length(ggps)],") ", componentAES$label[match(names(ggps), componentAES$level)]),
-  label.x = 0, vjust =1.2, font.label = list(size = 10),
-  align = "hv"
-  
-)%>%
-  ggpubr::ggexport(filename = here::here("figures/supplemental/allGlmFitPlots.pdf"),
-                   ncol = 3, 
-           width = 10, height= 10)
-
-
-```
-
-```{r plot only a subset of the correlations for a main figure?}
-
-selectedComponents <- c("policy","legislation","public interest","public support")
-
-
-ggpubr::ggarrange(
-  plotlist = ggps[names(ggps) %in% selectedComponents],
-  labels = paste0(letters[1:length(selectedComponents)],") ", componentAES$label[match(selectedComponents, componentAES$level)]),
-  label.x = 0, vjust =1.2, font.label = list(size = 10),
-  align = "hv"
-  
-)%>%
-  ggpubr::ggexport(filename = here::here("figures/main/selectedGlmFitPlots.pdf"),
-                   ncol = 2, 
-           width = 7, height= 5.5)
-
-```
-
-
-# Segway to TE -- Visualize timeseries of all components
+Action - various metrics (see below)
 
 ```{r plot multiplanel alluvial}
 # don't plot all components in the alluvial -- it would be too much
@@ -1058,6 +605,567 @@ ggsave(
     )
 
 ```
+
+```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("Data set alluvial plot"), echo=FALSE}
+
+knitr::include_graphics(here::here("figures/main/componentAlluvial_log.pdf"))
+```
+
+A closer look at the ORO-specific 'action' metrics:
+
+MRE - installed capacity (MW) - IRENA renewable electricity statistics
+
+Efficiency - domestic freight transport energy efficiency (gCO2/tkm) - IEA
+
+CCS - Storage Capacity associated with a project- oil and gas climate initiative
+
+CDR-BC - # restoration projects - Duarte et al 2020
+
+CDR-OAE/BioPump - # Field trials/startup companies - Ocean Visions Field trials, GESAMP climate intervention projects, OceanNETs ocean-based CDR companies
+
+
+```{r plot all deployment time series}
+
+allDep_ggp <- ggplot(
+  data = allComponentDat_model %>%
+    filter(component == "deployment") %>%
+    mutate(
+    oro_type = factor(oro_type, levels = typeAES$level, labels = typeAES$label)
+  )
+)+
+  geom_line(aes(year, y, col = oro_type))+
+  geom_text(aes(label = stringr::str_wrap(variable_name, width = 25),
+                fontface=3), x=-Inf, y=Inf,
+            check_overlap = TRUE, vjust=1, hjust=0, size=3)+
+  facet_wrap(vars(oro_type), scales="free")+
+  scale_colour_manual(
+    breaks = typeAES$label,
+    values = typeAES$colour
+  )+
+  labs(
+    x="Year",
+    y="Action metric",
+  )+
+  theme_minimal()+
+  theme(
+    legend.position = "none"
+  )
+
+allDep_ggp
+
+ggsave(here::here("figures/supplemental/mitigationDeploymentIndicators.pdf"), plot = allDep_ggp, width = 7, height=6)
+```
+
+```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("ORO-specific action metrics"), echo=FALSE}
+
+knitr::include_graphics(here::here("figures/supplemental/mitigationDeploymentIndicators.pdf"))
+```
+
+
+# Part 1: Narrative synthesis. Investigate drivers of break points
+
+*Key message*
+Key changes in policy/legislation, catalysed by the right socio-political environment, can have enormous impact on publication & action.
+
+
+## Case 1: Increase in MRE-Ocean publications in 2001
+
+This inflection was driven by a dramatic increase in publications by authors with Brazilian affiliations. Brazil experienced an energy crisis in 2001 due to droughts affecting hydroelectric grid – prompting diversification of renewable sources
+
+```{r calculate all author affiliations for all relevant references - load in next chunk, eval=FALSE}
+library(countrycode)
+library(tidyr)
+library(stringr)
+require(dbplyr)
+require(RSQLite)
+
+## connect to database
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+uniquerefs <- tbl(p1_db, "uniquerefs_update2025") %>%
+  select(analysis_id, year, affiliation)
+
+idCountry <- tbl(p1_db, "pred_oro_type_long") %>%
+  select(analysis_id) %>%
+  distinct(analysis_id) %>%
+  left_join(uniquerefs %>% select(analysis_id, year, affiliation), by = "analysis_id") %>%
+  collect()
+
+
+
+# Get a list of country names and codes
+load(here::here("data/derived-data/countries_ls.RData"))
+# countries_ls <- data.frame(name_en = countrycode::codelist$country.name.en) %>%
+#   mutate(country_iso = countrycode::countrycode(sourcevar   = name_en,
+#                                        origin      = "country.name",
+#                                        destination = "iso3c"),
+#          country=name_en)
+
+source(here::here("R", "extract_all_affiliation.R"))
+
+idCountry$countries <- extract_all_affiliation(idCountry$affiliation, countries_ls)
+
+dbWriteTable(conn=p1_db, 
+             name= "oro_id_allCountryAffil_lookup",
+             value=idCountry,
+             append=FALSE, 
+             overwrite = FALSE)
+
+
+dbDisconnect(p1_db)
+
+
+```
+
+
+```{r plot publication timeseries -- by affiliation, eval=FALSE}
+
+## Load data
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+# The author affiliations of each publication
+idCountry <- tbl(p1_db, "oro_id_allCountryAffil_lookup") %>%
+  select(analysis_id, countries, affiliation)%>%
+  collect()
+
+# publication year metadata
+uniquerefs <- tbl(p1_db, "uniquerefs_update2025") %>%
+  select(analysis_id, year) 
+
+# The article ids and their ORO type prediction
+predOroType <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+  left_join(uniquerefs, by = "analysis_id") %>%
+  collect()%>%
+  left_join(idCountry, by="analysis_id")
+
+
+# predOroType <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+#   collect()%>%
+#   left_join(idCountry, by = "analysis_id") 
+
+dbDisconnect(p1_db)
+
+
+
+## Calculate per oro type, the frequency of country affiliation per year
+# columns, analysis_id, oro_type, year, country, count
+uniqueCountries <- strsplit(idCountry$countries, " ; ") %>% unlist() %>% unique()
+
+affTypeTop10 <- strsplit(idCountry$countries, ", ") %>% unlist() %>% table %>% sort(decreasing = TRUE) %>% head(7) %>% names()
+
+
+oro_year_count_long <- data.frame()
+
+for(country in uniqueCountries){
+  dfTemp <- predOroType %>%
+    filter(grepl(country, countries)) %>%
+    group_by(level, year) %>%
+    summarise(
+      count = n_distinct(analysis_id)
+    ) %>%
+    mutate(
+      country_unique = country
+    )
+  oro_year_count_long <- oro_year_count_long %>%
+    bind_rows(dfTemp)
+}
+
+oro_year_count_long <- oro_year_count_long %>%
+  mutate(
+    country = ifelse(country_unique %in% affTypeTop10, country_unique, "Other")
+  )
+
+totals <- oro_year_count_long %>%
+  group_by(level, year) %>%
+  summarise(
+    total = sum(count, na.rm=T)
+  )
+oro_year_count_long <- oro_year_count_long %>%
+  left_join(totals) %>%
+  mutate(
+    prop = count/total,
+    oro_type = factor(
+      gsub("[.]","-", level),
+      levels = typeAES$level,
+      labels = typeAES$label
+    ),
+    year = as.numeric(year)
+  )%>%
+  filter(
+    !is.na(year)
+  )%>%
+  filter(
+    1980 <= year, year <= 2024
+  )
+
+summary(oro_year_count_long)
+
+
+## Overlay a lineplot of the interannual trend in N publications for each ORO type
+oroPub01 <- predOroType %>%
+  mutate(
+    level = gsub("[.]","-", level),
+    year= as.numeric(year)
+    ) %>%
+  filter(!is.na(year)) %>%
+  filter(
+    1980 <= year, year <= 2024
+  )%>%
+  mutate(
+    lower_prediction = mean_prediction - std_prediction,
+    upper_prediction = mean_prediction + std_prediction
+  ) %>%
+  group_by(level, year) %>%
+  summarise(
+    y_mean = n_distinct(analysis_id[0.5 <= mean_prediction]),
+    y_lower = n_distinct(analysis_id[0.5 <= lower_prediction]),
+    y_upper = n_distinct(analysis_id[0.5 <= upper_prediction])
+  ) %>%
+  group_by(level) %>%
+  mutate(
+    log_y_mean_01 = scales::rescale(log(y_mean), to = c(0,1), na.rm=T),
+  ) %>%
+  ungroup()%>%
+  mutate(
+    oro_type = factor(
+      level,
+      levels = typeAES$level,
+      labels = typeAES$label
+    )
+  )
+
+
+
+## Plot 1
+# A stacked bar plot with year on x axis, proportion of publications by author country on the y
+# overlain with the interannual trend in N publications 
+# faceted by ORO type
+
+# This shows that the inflection in N publications at ~2000 is due to MRE-Ocean
+
+countryProp_ggp <- ggplot(
+  data = oro_year_count_long,
+  aes(x=year)
+)+
+  geom_col(position = "stack", aes(y=prop, fill = country))+
+  geom_line(data = oroPub01,
+            aes(y=log_y_mean_01), col="#00f3ff")+
+  facet_wrap(vars(oro_type), ncol = 2, scales="free_x")+
+  scale_x_continuous(limits = c(1980,2024))+
+  scale_fill_brewer(type = "qual")+
+  guides(fill = guide_legend(nrow=3))+
+  labs(
+    x="Year",
+    y = "Proportion of total publications",
+    fill = "Country"
+  )+
+  theme_minimal()+
+  theme(
+    legend.position = "bottom"
+  )
+
+countryProp_ggp
+
+
+ggsave(
+  here::here("figures/supplemental/propCountAffilByOroYear.pdf"),
+  plot = countryProp_ggp,
+  width = 6, height=7
+)
+
+
+
+## Plot 2: 
+## zoom in on MRE-Ocean
+mreO_countryProp_ggp <- ggplot(
+  data = oro_year_count_long %>%
+    filter(oro_type == "MRE-Ocean"),
+  aes(x=year)
+)+
+  geom_col(position = "stack", aes(y=prop, fill = country))+
+  geom_line(data = oroPub01%>%
+    filter(oro_type == "MRE-Ocean"),
+            aes(y=log_y_mean_01), col="#00f3ff")+
+  scale_x_continuous(limits = c(1980,2024))+
+  guides(fill = guide_legend(nrow=3))+
+  scale_fill_brewer(type = "qual")+
+  labs(
+    x="Year",
+    y = "Proportion of total publications",
+    fill = "Country"
+  )+
+  theme_minimal(base_size = 10)+
+  theme(
+    legend.position = "bottom"
+  )
+
+mreO_countryProp_ggp
+
+
+## Which countries in the 'Other' category are causing this increase?
+
+oro_year_count_long %>%
+    filter(oro_type == "MRE-Ocean", year %in% c(2002,2003)) %>% 
+  pivot_wider(names_from = year, values_from = count, id_cols = c(country_unique))%>% 
+  replace_na(list(`2002`=0, `2003`=0))%>%
+  mutate(difference = (`2003`-`2002`)) %>%
+  arrange(desc(difference)) %>%
+  filter(!is.infinite(difference))%>%
+  select(country_unique, `2002`, `2003`, difference) %>%
+  filter(!(country_unique %in% affTypeTop10))%>%
+  View()
+
+
+# looks like brazil went from 0 to 82 publications...
+
+## Plot 3: Time series of Brazil publications
+brazilPub_ggp <- oro_year_count_long %>%
+    filter(oro_type == "MRE-Ocean", country_unique == "Brazil")%>%
+  ggplot(aes(year, log(count)))+
+  geom_line()+
+  scale_y_continuous(
+    name = "log(N publications)",
+    sec.axis = sec_axis( transform=~exp(.), name="N publications")
+  ) +
+  labs(
+    x = "Year"
+    # y = "Brazil affiliated publications (N)"
+  )+
+  theme_minimal(base_size = 10)
+brazilPub_ggp
+
+
+ggarrange(
+  plotlist = list(mreO_countryProp_ggp, brazilPub_ggp),
+  labels = paste0(letters[1:2], ")"), 
+  label.x = 0, vjust =1.2, font.label = list(size = 10),
+  
+  align = "h"
+)  %>%
+  ggpubr::ggexport(filename = here::here("figures/supplemental/MRE_brazil_drivers.pdf"),
+                   nrow = 1, 
+           width = 7, height= 4)
+
+
+
+```
+
+
+
+```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("Brazil publications on MRE-Ocean contribute to inflection point in # publications"), echo=FALSE}
+
+knitr::include_graphics(here::here("figures/supplemental/MRE_brazil_drivers.pdf"))
+```
+
+
+
+
+# Correlation analysis (non-temporal)
+
+Because I'm summarizing across years and comparing oros between each other, cannot include deployment because all the metrics are on different scales
+
+MOdify to only look at primary research?
+```{r fit glm between publication and all other components}
+
+family_lookup <- allComponentDat_model %>% ungroup() %>% 
+  distinct(component) %>% 
+  select(component) %>%
+  filter(!(component %in% c("public opposition","publications","deployment"))) %>%
+  mutate(
+    family = case_when(
+      component %in% c("policy","legislation") ~ "poisson()",
+      component %in% c("public support (relative)","public support agreement") ~ "binomial()",
+      TRUE ~ "Gamma()"
+    )
+  )
+
+# keep each year as an indivdual data point or summarize across years? T
+# This is easier for counts because I can sum, but for things like proportion
+components <- unique(allComponentDat_model$component)
+components <- components[!(components %in% c("publications","deployment","public opposition"))]
+
+ggps <- vector("list", length(components))
+names(ggps) <- components
+modelResults <- vector("list", length(components))
+for(c in 1:length(components)){
+  
+  if(components[c] == "public support agreement"){
+    tmpDat <- allComponentDat_model %>%
+      filter(component %in% c("publications", "public support","public opposition")) %>%
+      group_by(oro_type, component) %>%
+      summarise(
+        y = sum(y, na.rm=T)
+      )%>%
+      mutate(y=round(y)) %>%
+      pivot_wider(names_from = component, values_from = y, id_cols = c(oro_type)) %>%
+      na.omit()
+    colnames(tmpDat) <- gsub(" ","_", colnames(tmpDat))
+    # tmpDat$publications <- scale(tmpDat$publications)[,1] ## ?scale?
+    
+    mod <- glm(cbind(public_support, public_opposition) ~ publications, 
+               data = tmpDat,
+               family = eval(parse(text = family_lookup$family[family_lookup$component == components[c]])))
+    
+    # get a variable on the response scale for plotting
+    tmpDat<- tmpDat %>%
+      mutate(
+        response_y = public_support/(public_opposition+public_support)
+      )
+  }
+  else if(components[c] == "public support (relative)"){
+    tmpDat <- allComponentDat_model %>%
+      filter(component %in% c("publications", "public support","public interest weighted")) %>%
+      group_by(oro_type, component) %>%
+      summarise(
+        y = sum(y, na.rm=T)
+      )%>%
+      mutate(y=round(y)) %>%
+      pivot_wider(names_from = component, values_from = y, id_cols = c(oro_type)) %>%
+      mutate(public_support_relative = `public support`/`public interest weighted`) %>%
+      na.omit()
+    colnames(tmpDat) <- gsub(" ","_", colnames(tmpDat))
+    # tmpDat$publications <- scale(tmpDat$publications)[,1] ## ?scale?
+    
+    mod <- glm(public_support_relative ~ publications, 
+               weights = tmpDat$public_interest_weighted,
+               data = tmpDat,
+               family = eval(parse(text = family_lookup$family[family_lookup$component == components[c]])))
+    # get a variable on the response scale for plotting
+    tmpDat<- tmpDat %>%
+      mutate(
+        response_y = public_support_relative
+      )
+    
+  }else{
+    tmpDat <- allComponentDat_model %>%
+      filter(component %in% c("publications", components[c])) %>%
+      group_by(oro_type, component) %>%
+      summarise(
+        y = sum(y, na.rm=T)
+      )%>%
+      pivot_wider(names_from = component, values_from = y, id_cols = c(oro_type)) %>%
+      na.omit()
+    colnames(tmpDat)[colnames(tmpDat) == components[c]] <- "y"
+    
+    if(family_lookup$family[family_lookup$component == components[c]] == "poisson()"){
+      tmpDat$y <- round(tmpDat$y)
+    }
+    
+    colnames(tmpDat) <- gsub(" ","_", colnames(tmpDat))
+    # tmpDat$publications <- scale(tmpDat$publications)[,1] ## ?scale?
+    
+    
+    mod <- glm(y ~ publications, 
+               data = tmpDat,
+               family = eval(parse(text = family_lookup$family[family_lookup$component == components[c]])))
+    # get a variable on the response scale for plotting
+    tmpDat<- tmpDat %>%
+      mutate(
+        response_y = y
+      )
+  }
+  
+
+    
+  ## Get model predictions
+  predDat <- data.frame(
+    publications = seq(from = min(tmpDat$publications), to = max(tmpDat$publications), length.out = 50)
+  )
+  preds <- predict(mod, newdata = predDat, se.fit = TRUE, type = "response")
+  predDat$mean_fit <- preds$fit
+  predDat$lower_fit <- preds$fit - preds$se.fit
+  predDat$upper_fit <- preds$fit + preds$se.fit
+    
+  ## store model results
+  modSummary <- summary(mod)
+  modSummary <- as.data.frame(t(modSummary$coefficients["publications",])) 
+  modSummary$component = components[c]
+  modelResults[[c]] <- modSummary
+  
+  
+  pval = data.frame(
+    label = paste(
+    "p-value <", ifelse(
+      modSummary[,grep("Pr", names(modSummary))] < 0.01, "0.01", 
+      (
+        signif(modSummary[,grep("Pr", names(modSummary))], digits=2)
+      ))
+  )
+  )
+ 
+  
+  ## Plot 
+  ggps[[c]] <- ggplot()+
+    geom_ribbon(data = predDat, aes(x=publications, ymin = lower_fit, ymax = upper_fit), alpha = 0.5)+
+    geom_line(data = predDat, aes(x=publications, y=mean_fit), col="red")+
+    # geom_text(data = tmpDat, aes(x=publications, y = public_support/(public_opposition+public_support), label = oro_type))+
+    ggrepel::geom_text_repel(data = tmpDat, aes(x=publications, y = response_y, label = oro_type), force = 0.3,
+                             size=2.5)+ 
+    ggrepel::geom_text_repel(data = pval, aes(label = stringr::str_wrap(label, 8), fontface=3), 
+                             x=Inf, y=-Inf, hjust=1, vjust=0, col="red",
+                             size=2.5)+
+    labs(
+      x = "Publications (N)",
+      y = componentAES$label[componentAES$level == components[c]]
+    )+
+    theme_minimal()+
+    theme(
+      axis.title = element_text(size=10),
+      plot.margin = unit(c(0.7,0.3,0.3,0.3),"cm")
+    )
+
+  
+}
+
+modelResults <- do.call("bind_rows", modelResults)
+modelResults$family <- family_lookup$family[match(modelResults$component, family_lookup$component)]
+modelResults$component <- componentAES$label[match(modelResults$component, componentAES$level)]
+
+
+## save
+
+write.csv(
+  modelResults,
+  here::here("outputs/publications_otherDim_glmResults.csv")
+)
+
+ggpubr::ggarrange(
+  plotlist = ggps,
+  labels = paste0(letters[1:length(ggps)],") ", componentAES$label[match(names(ggps), componentAES$level)]),
+  label.x = 0, vjust =1.2, font.label = list(size = 10),
+  align = "hv"
+  
+)%>%
+  ggpubr::ggexport(filename = here::here("figures/supplemental/allGlmFitPlots.pdf"),
+                   ncol = 3, 
+           width = 10, height= 10)
+
+
+```
+
+```{r plot only a subset of the correlations for a main figure?}
+
+selectedComponents <- c("policy","legislation","public interest","public support")
+
+
+ggpubr::ggarrange(
+  plotlist = ggps[names(ggps) %in% selectedComponents],
+  labels = paste0(letters[1:length(selectedComponents)],") ", componentAES$label[match(selectedComponents, componentAES$level)]),
+  label.x = 0, vjust =1.2, font.label = list(size = 10),
+  align = "hv"
+  
+)%>%
+  ggpubr::ggexport(filename = here::here("figures/main/selectedGlmFitPlots.pdf"),
+                   ncol = 2, 
+           width = 7, height= 5.5)
+
+```
+
+
 
 
 # Transfer entropy
@@ -2506,7 +2614,7 @@ ggsave(
 
 # Changepoint sub-analysis
 
-For efficiency and CCS, Efficiency and MRE-Ocean, looks like change points in deployment time series -- what could have caused these increases? Could they be related to change points in other time series? While we cannot infer causality, we can say that these change points occur around the same time...
+For CCS, Efficiency and MRE-Ocean, looks like change points in deployment time series -- what could have caused these increases? Could they be related to change points in other time series? While we cannot infer causality, we can say that these change points occur around the same time...
 
 To explore this, fit a Bayesian multiple change point model (adapted from Cahill et al. 2015, doi: 10.1088/1748-9326/10/8/084002 for different distributions depending on response variable: ZIP for legislation and policy documents, Poisson for deployments for CDR-OAE, number of publications and number of posts, and Gamma for other deployment metrics and number of weighted posts as they are non-negative continuous data). This model estimates the number of probable change points, and then for each change point the posterior distribution. 
 
@@ -2956,37 +3064,6 @@ ggsave(
 
 ### External drivers of deployment change points
 
-```{r plot all deployment time series}
-
-allDep_ggp <- ggplot(
-  data = allComponentDat_model %>%
-    filter(component == "deployment") %>%
-    mutate(
-    oro_type = factor(oro_type, levels = typeAES$level, labels = typeAES$label)
-  )
-)+
-  geom_line(aes(year, y, col = oro_type))+
-  geom_text(aes(label = stringr::str_wrap(variable_name, width = 25),
-                fontface=3), x=-Inf, y=Inf,
-            check_overlap = TRUE, vjust=1, hjust=0, size=3)+
-  facet_wrap(vars(oro_type), scales="free")+
-  scale_colour_manual(
-    breaks = typeAES$label,
-    values = typeAES$colour
-  )+
-  labs(
-    x="Year",
-    y="Action metric",
-  )+
-  theme_minimal()+
-  theme(
-    legend.position = "none"
-  )
-
-allDep_ggp
-
-ggsave(here::here("figures/supplemental/mitigationDeploymentIndicators.pdf"), plot = allDep_ggp, width = 7, height=6)
-```
 
 Look for external drivers of deployment change points
 ```{r qualitative CP attribution - external}
@@ -3288,6 +3365,9 @@ ggpubr::ggarrange(
 
 
 ```
+
+
+
 
 
 
