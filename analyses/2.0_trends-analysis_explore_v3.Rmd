@@ -2797,7 +2797,8 @@ knitr::include_graphics(here::here("figures/main/allChangePointPlots.pdf"))
 # 2.1: Match/mis-match (non-temporal)
 
 *Key message* 
-Public interest does not match well with publications (not significant). Legislation and policy show better alignment (significant).
+Which OROs recieve more/less attention in policy, legislation and social media, given their number of publications?
+
 
 NB: Because compares OROs between each other, cannot include deployment because all the metrics are on different scales
 
@@ -2808,7 +2809,7 @@ NB: Because compares OROs between each other, cannot include deployment because 
 
 
 
-```{r fit poisson glm between total N publication and all other components, eval = FALSE}
+```{r keep in back pocket - fit poisson glm between total N publication and all other components, eval = FALSE}
 require(glmmTMB)
 
 
@@ -2819,9 +2820,9 @@ require(glmmTMB)
 components <- unique(allComponentDat_model$component) 
 components <- components[!(components %in% c("publications","deployment","public opposition"))]
 
-ggps <- vector("list", length(components))
-names(ggps) <- components
-modelResults <- vector("list", length(components))
+ggps_pubs <- vector("list", length(components))
+names(ggps_pubs) <- components
+modelResultsPubs <- vector("list", length(components))
 for(c in 1:length(components)){
   
   ## Fit the model
@@ -2915,7 +2916,7 @@ for(c in 1:length(components)){
         )
       )
   }
-  modelResults[[c]] <- mod_sum
+  modelResultsPubs[[c]] <- mod_sum
   
   
   pval = data.frame(
@@ -2924,7 +2925,7 @@ for(c in 1:length(components)){
  
   
   ## Plot 
-  ggps[[c]] <- ggplot()+
+  ggps_pubs[[c]] <- ggplot()+
     # geom_ribbon(data = predDat, aes(x=publications, ymin = lower_fit, ymax = upper_fit), alpha = 0.1)+
     geom_line(data = predDat, aes(x=publications, y=mean_fit), col="black", linetype="dotted")+
     # geom_text(data = tmpDat, aes(x=publications, y = public_support/(public_opposition+public_support), label = oro_type))+
@@ -2948,12 +2949,12 @@ for(c in 1:length(components)){
       plot.margin = unit(c(0.7,0.3,0.3,0.3),"cm")
     )
   
-  ggps[[c]]
+  ggps_pubs[[c]]
 
   
 }
 
-modelResultsTable <- do.call("bind_rows", modelResults)
+modelResultsPubsTable <- do.call("bind_rows", modelResultsPubs)
 
 
 
@@ -2961,13 +2962,13 @@ modelResultsTable <- do.call("bind_rows", modelResults)
 ## save
 
 write.csv(
-  modelResults,
+  modelResultsPubs,
   here::here("outputs/publications_otherDim_glmResults.csv")
 )
 
 ggpubr::ggarrange(
-  plotlist = ggps,
-  labels = paste0(letters[1:length(ggps)],") ", componentAES$label[match(names(ggps), componentAES$level)]),
+  plotlist = ggps_pubs,
+  labels = paste0(letters[1:length(ggps_pubs)],") ", componentAES$label[match(names(ggps_pubs), componentAES$level)]),
   label.x = 0, vjust =1.2, font.label = list(size = 10),
   align = "hv"
 
@@ -2979,142 +2980,6 @@ ggpubr::ggarrange(
 
 ```
 
-
-But this is misleading. Of course MRE ocean weould have a weaker response because there are SO MANY publications...
-
-```{r remove this fit glm ratio between component ~ publication + year + oro, eval = FALSE}
-library(ggeffects)
-
-# “For each ORO, how many public-interest posts do you get per publication?”
-# EG the probability of getting a post per publication.
-# Include year as a predictor to account for the temporal trend.
-# Because temporal 
-
-
-## Loop through the different components and fit glm
-# sum metric values across years
-
-# different components to loop through
-components <- unique(allComponentDat_model$component) 
-components <- components[!(components %in% c("publications","deployment"))]
-
-ggps <- vector("list", length(components))
-names(ggps) <- components
-modelResults <- vector("list", length(components))
-for(c in 1:length(components)){
-  
-  ## Fit the model
-  tmpDat <- allComponentDat_model %>%
-    filter(component %in% c("publications", components[c])) %>%
-    mutate(y = round(y)) %>%
-    pivot_wider(names_from = component, values_from = y, id_cols = c(oro_type, year)) %>%
-    na.omit() %>%
-    filter(0 < publications) %>%
-    mutate(
-      oro_type = factor(
-        oro_type, levels = typeAES$level
-      )
-    )
-  colnames(tmpDat)[colnames(tmpDat) == components[c]] <- "y"
-  colnames(tmpDat) <- gsub(" ","_", colnames(tmpDat))
-  tmpDat$ratio <- tmpDat$y / tmpDat$publications
-  
-  mod <- glm(y ~ publications + oro_type + year, 
-                 data = tmpDat,
-             offset = log(publications),
-                 family = poisson())
-
-
-  # The coefficients table for oro_type (exclude intercept and year)
-  mod_sum <- summary(mod)
-  coef_table <- as.data.frame(mod_sum$coefficients) %>%
-    rownames_to_column("term") %>%
-    filter(grepl("oro_type", term)) %>%
-    mutate(
-      oro_type = gsub("oro_type", "", term),  # clean factor names
-      p_value = `Pr(>|z|)`,
-      p_label = ufs::formatPvalue(p_value)
-    ) %>%
-    select(oro_type, p_value, p_label)
-
-  
-  pred <- ggpredict(mod, terms = "oro_type", condition = c(publications = 1))
-  pred <- merge(pred, coef_table, by.x = "x", by.y = "oro_type", all.x = TRUE)
-  avg_effect <- mean(pred$predicted, na.rm = TRUE)
-
-  ## Plot
-  
-  ggps[[c]] <- ggplot(pred, aes(x = x, y = predicted)) +
-    # predicted points
-    geom_point(size = 3, color = "blue") +
-    # 95% CI bars
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
-                  width = 0.2, color = "blue") +
-    # raw observed ratios
-    geom_jitter(data = tmpDat,
-                aes(x = oro_type, y = ratio),
-                width = 0.2, height = 0, color = "red", alpha = 0.3) +
-    # p-value labels above predicted points
-    geom_text(aes(label = p_label),
-              y=Inf,
-              size = 3, color = "black", vjust=1, angle=45, hjust=1) +
-    # Average effect
-    geom_hline(yintercept = avg_effect, linetype = "dashed", color = "black") +
-    scale_y_continuous(limits = quantile(tmpDat$ratio, probs = c(0,0.9)))+
-    labs(y = "Marginal effect/publication",
-         x = "ORO type") +
-    theme_minimal(base_size = 10)+
-    theme(
-      axis.text.x = element_text(angle = 45, hjust=1, vjust=1),
-      axis.title = element_text(size=10),
-      plot.margin = unit(c(0.7,0.3,0.3,0.3),"cm")
-    )
-  
-  ggps[[c]]
-
-  
-  
-  ## store model results
-  modSummary <- as.data.frame(mod_sum$coefficients) %>%
-    rownames_to_column("term") %>%
-    mutate(component = components[c]) %>%
-    relocate(component)
-  modelResults[[c]] <- modSummary
-  
-  
-}
-
-modelResults <- do.call("bind_rows", modelResults)
-modelResults$family <- "Poisson"
-modelResults$component <- componentAES$label[match(modelResults$component, componentAES$level)]
-
-
-
-
-
-## save
-
-write.csv(
-  modelResults,
-  here::here("outputs/publications_otherDim_glmResults_ratio2pub.csv")
-)
-
-
-
-ggpubr::ggarrange(
-  plotlist = ggps,
-  labels = paste0(letters[1:length(ggps)],") ", componentAES$label[match(names(ggps), componentAES$level)]),
-  label.x = 0, vjust =1.2, font.label = list(size = 10),
-  align = "hv"
-
-)%>%
-  ggpubr::ggexport(filename = here::here("figures/main/GlmFitPlots_ratio2pub.pdf"),
-                   ncol = 2,
-           width = 8, height= 6.5)
-
-
-
-```
 
 
 But this is slightly different -- what is the public interest on oros after publications and year are accounted for?
@@ -3128,7 +2993,7 @@ But what if publications incrase but overall posts on oros go down, this would b
 Also if there are lags between the time series we won't see this either -- this is more getting into transfer entropy analysis. 
 
 It doens't answer the simple question -- are the OROs that are most evidenced also the most interested/appear in policy/etc?
-```{r remove this - fit glm proportional share of component ~ proportional share of publication + year + oro, eval = FALSE}
+```{r fit glm proportional share of component ~ proportional share of publication + year + oro, eval = FALSE}
 library(ggeffects)
 
 # “For each ORO, how many public-interest posts do you get per publication?”
@@ -3144,9 +3009,9 @@ library(ggeffects)
 components <- unique(allComponentDat_model$component) 
 components <- components[!(components %in% c("publications","deployment"))]
 
-ggps <- vector("list", length(components))
-names(ggps) <- components
-modelResults <- vector("list", length(components))
+ggps_prop <- vector("list", length(components))
+names(ggps_prop) <- components
+modelResultsProp <- vector("list", length(components))
 for(c in 1:length(components)){
   
   ## Fit the model
@@ -3159,6 +3024,9 @@ for(c in 1:length(components)){
     pivot_wider(names_from = component, values_from = total)
 
   tmpDat <- allComponentDat_model %>%
+    mutate(
+      y= round(y)
+    )%>%
     filter(component %in% c("publications", components[c])) %>%
     pivot_wider(names_from = component, values_from = y, id_cols = c("oro_type","year")) %>%
     left_join(tmpDat_annualSum, by = c("year"), suffix = c("","_total")) %>%
@@ -3170,31 +3038,95 @@ for(c in 1:length(components)){
         levels = typeAES$level
       )
     )
+  
   colnames(tmpDat) <- gsub(components[c],"y", colnames(tmpDat))
   tmpDat$prop_y <- tmpDat$y/tmpDat$y_total
   tmpDat$prop_y[is.na(tmpDat$prop_y)] <- 0
   tmpDat$fail <- as.integer(tmpDat$y_total-tmpDat$y)
   tmpDat$y <- as.integer(tmpDat$y)
+  tmpDat<- tmpDat[0<tmpDat$y_total,]
 
   mod <- glm(cbind(y, fail) ~ prop_pub + oro_type + year, 
                  data = tmpDat ,
-                  weights = y_total,
                  family = binomial)
-
+  
+  od <- performance::check_overdispersion(mod)
+  if(od$dispersion_ratio > 1 & od$p_value < 0.05){
+    
+    mod <- glm(cbind(y, fail) ~ prop_pub + oro_type + year, 
+                 data = tmpDat,
+                 family = quasibinomial)
+    
+  }
+  
+  
+  plot_model(mod, type = "pred", terms = c("oro_type"))
   plot_model(mod, type = "pred", terms = c("prop_pub"))
   
   
   # The coefficients table for oro_type (exclude intercept and year)
   mod_sum <- summary(mod)
-  coef_table <- as.data.frame(mod_sum$coefficients) %>%
+  
+  if(mod_sum$family$family == "quasibinomial"){
+    coef_table <- as.data.frame(mod_sum$coefficients) %>%
     rownames_to_column("term") %>%
-    filter(grepl("oro_type", term)) %>%
+    filter(grepl("prop_pub|oro_type", term)) %>%
+    mutate(
+      oro_type = gsub("oro_type", "", term),  # clean factor names
+      p_value = `Pr(>|t|)`,
+      p_label = ufs::formatPvalue(p_value)
+    ) %>%
+      mutate(
+        oro_type = case_when(
+          oro_type == "prop_pub" ~ "MRE-Ocean",
+          TRUE ~ oro_type
+        )
+      )%>%
+    select(oro_type, p_value, p_label)
+    
+    distributionLabel <- paste0(
+      "Quasibinomial (dispersion = ",
+      scales::number(mod_sum$dispersion, accuracy = 1, big.mark = ","),")"
+    )
+    
+  }else{
+    coef_table <- as.data.frame(mod_sum$coefficients) %>%
+    rownames_to_column("term") %>%
+    filter(grepl("prop_pub|oro_type", term)) %>%
     mutate(
       oro_type = gsub("oro_type", "", term),  # clean factor names
       p_value = `Pr(>|z|)`,
       p_label = ufs::formatPvalue(p_value)
     ) %>%
+      mutate(
+        oro_type = case_when(
+          oro_type == "prop_pub" ~ "MRE-Ocean",
+          TRUE ~ oro_type
+        )
+      )%>%
     select(oro_type, p_value, p_label)
+    
+    distributionLabel <- "Binomial"
+  }
+  
+  ## store model results
+  componentLabel <- componentAES$label[match(components[c], componentAES$level)]
+  
+  modSummary <- as.data.frame(mod_sum$coefficients) %>%
+    rownames_to_column("Term") %>%
+    mutate(Component = 
+             paste0(
+               componentLabel
+             ),
+    Distribution = distributionLabel) %>%
+    relocate(Component) %>%
+    mutate(
+      Term = gsub("prop_pub","MRE-Ocean", gsub("oro_type", "", Term))
+    )
+
+  modelResultsProp[[c]] <- modSummary
+
+  
 
   
   ## Plot just the oro term
@@ -3203,7 +3135,7 @@ for(c in 1:length(components)){
   pred <- merge(pred, coef_table, by.x = "x", by.y = "oro_type", all.x = TRUE)
   avg_effect <- mean(pred$predicted, na.rm = TRUE)
   
-  ggps[[c]] <- ggplot(pred, aes(x = x, y = predicted)) +
+  ggps_prop[[c]] <- ggplot(pred, aes(x = x, y = predicted)) +
     # predicted points
     geom_point(size = 3, color = "blue") +
     # 95% CI bars
@@ -3219,7 +3151,7 @@ for(c in 1:length(components)){
               size = 3, color = "black", vjust=1, angle=45, hjust=1) +
     # Average effect
     geom_hline(yintercept = avg_effect, linetype = "dashed", color = "black") +
-    scale_y_continuous(limits = c(NA, max(pred$predicted+pred$std.error, na.rm=T)),
+    scale_y_continuous(limits = c(NA, max(pred$conf.high, na.rm=T)),
                        expand = expansion(mult=c(0,0.2)))+
     labs(y = "Marginal effect",
          x = "ORO type") +
@@ -3230,23 +3162,14 @@ for(c in 1:length(components)){
       plot.margin = unit(c(0.7,0.3,0.3,0.3),"cm")
     )
   
-  ggps[[c]]
+  ggps_prop[[c]]
 
-  
-  
-  ## store model results
-  modSummary <- as.data.frame(mod_sum$coefficients) %>%
-    rownames_to_column("term") %>%
-    mutate(component = components[c]) %>%
-    relocate(component)
-  modelResults[[c]] <- modSummary
-  
   
 }
 
-modelResults <- do.call("bind_rows", modelResults)
-modelResults$Distribution <- "Binomial"
-modelResults$component <- componentAES$label[match(modelResults$component, componentAES$level)]
+modelResultsPropTable <- do.call("bind_rows", modelResultsProp)
+
+
 
 
 
@@ -3255,15 +3178,15 @@ modelResults$component <- componentAES$label[match(modelResults$component, compo
 ## save
 
 write.csv(
-  modelResults,
+  modelResultsPropTable,
   here::here("outputs/publications_otherDim_glmResults_proportion.csv")
 )
 
 
 
 ggpubr::ggarrange(
-  plotlist = ggps,
-  labels = paste0(letters[1:length(ggps)],") ", componentAES$label[match(names(ggps), componentAES$level)]),
+  plotlist = ggps_prop,
+  labels = paste0(letters[1:length(ggps_prop)],") ", componentAES$label[match(names(ggps_prop), componentAES$level)]),
   label.x = 0, vjust =1.2, font.label = list(size = 10),
   align = "hv"
 
@@ -3277,6 +3200,246 @@ ggpubr::ggarrange(
 ```
 
 
+```{r winner -- fit glm proportional share of component ~ proportional share of publication + year, eval = FALSE}
+library(ggeffects)
+
+# “For each ORO, how many public-interest posts do you get per publication?”
+# EG the probability of getting a post per publication.
+# Include year as a predictor to account for the temporal trend.
+# Because temporal 
+
+
+## Loop through the different components and fit glm
+# sum metric values across years
+
+# different components to loop through
+components <- unique(allComponentDat_model$component) 
+components <- components[!(components %in% c("publications","deployment"))]
+
+ggps_prop <- vector("list", length(components))
+names(ggps_prop) <- components
+modelResultsProp <- vector("list", length(components))
+for(c in 1:length(components)){
+  
+  ## Fit the model
+  tmpDat_annualSum <- allComponentDat_model %>%
+    filter(component %in% c("publications", components[c])) %>%
+    group_by(year, component) %>%
+    summarise(
+      total = round(sum(y, na.rm = T))
+    ) %>%
+    pivot_wider(names_from = component, values_from = total)
+
+  tmpDat <- allComponentDat_model %>%
+    mutate(
+      y= round(y)
+    )%>%
+    filter(component %in% c("publications", components[c])) %>%
+    pivot_wider(names_from = component, values_from = y, id_cols = c("oro_type","year")) %>%
+    left_join(tmpDat_annualSum, by = c("year"), suffix = c("","_total")) %>%
+    mutate(across(where(is.numeric), ~ ifelse(is.na(.x), 0, .x))) %>%
+    mutate(
+      prop_pub = publications/publications_total,
+      oro_type = factor(
+        oro_type,
+        levels = typeAES$level
+      )
+    )
+  
+  colnames(tmpDat) <- gsub(components[c],"y", colnames(tmpDat))
+  tmpDat$prop_y <- tmpDat$y/tmpDat$y_total
+  tmpDat$prop_y[is.na(tmpDat$prop_y)] <- 0
+  tmpDat$fail <- as.integer(tmpDat$y_total-tmpDat$y)
+  tmpDat$y <- as.integer(tmpDat$y)
+  tmpDat<- tmpDat[0<tmpDat$y_total,]
+
+  mod <- glm(cbind(y, fail) ~ prop_pub + year, 
+                 data = tmpDat ,
+                 family = binomial)
+  
+  od <- performance::check_overdispersion(mod)
+  if(od$dispersion_ratio > 1 & od$p_value < 0.05){
+    
+    mod <- glm(cbind(y, fail) ~ prop_pub + year, 
+                 data = tmpDat,
+                 family = quasibinomial)
+    
+  }
+  
+  
+  plot_model(mod, type = "pred", terms = c("prop_pub"))
+  
+  
+  # The coefficients table for oro_type (exclude intercept and year)
+  mod_sum <- summary(mod)
+  
+  if(mod_sum$family$family == "quasibinomial"){
+    distributionLabel <- paste0(
+      "Quasibinomial (dispersion = ",
+      scales::number(mod_sum$dispersion, accuracy = 1, big.mark = ","),")"
+    )
+    
+  }else{
+    distributionLabel <- "Binomial"
+  }
+  
+  ## store model results
+  componentLabel <- componentAES$label[match(components[c], componentAES$level)]
+  
+  modSummary <- as.data.frame(mod_sum$coefficients) %>%
+    rownames_to_column("Term") %>%
+    mutate(Component = 
+             paste0(
+               componentLabel
+             ),
+    Distribution = distributionLabel) %>%
+    relocate(Component) %>%
+    mutate(
+      Term = gsub("prop_pub","Proportion of publications", gsub("year", "Year", Term))
+    )
+
+  modelResultsProp[[c]] <- modSummary
+
+  pval = data.frame(
+    estimate = paste(signif(modSummary[grepl("publications",modSummary$Term),grep("Estimate", colnames(modSummary))],
+                                    digits = 2)),
+    pval = ufs::formatPvalue(modSummary[grepl("publications",modSummary$Term),grep("Pr", colnames(modSummary))])
+  ) %>%
+    mutate(
+      label = paste0(
+        "\u03b2 = ", estimate,"\n",pval
+      )
+    )
+  
+  
+  # add a shape variable
+  shapelookup <- tmpDat %>%
+    distinct(oro_type)%>%
+     mutate(
+       oro_branch = case_when(
+         grepl("MRE", oro_type)~"MRE",
+         grepl("CDR",oro_type)~"CDR",
+         TRUE~"Other"
+       )
+     )%>%
+    group_by(oro_branch)%>%
+    mutate(
+      shape_type = factor(row_number(), levels = 1:3, labels = c(15, 16, 17))
+    )
+  tmpDatPlot <- tmpDat%>%
+    left_join(shapelookup, by = "oro_type")
+  
+  
+  tmpDatSums <- tmpDat %>%
+    group_by(oro_type) %>%
+    summarise(
+      prop_y = mean(prop_y, na.rm = T),
+      prop_pub = mean(prop_pub, na.rm=T)
+    )
+    
+ 
+  
+  ## Plot 
+  pred <- ggpredict(mod, terms = "prop_pub [all]")
+  
+  ggps_prop[[c]] <- ggplot(data = pred)+
+    geom_line(aes(x, predicted), col="black",linetype = "solid", size=0.7)+
+    geom_ribbon(aes(x=x, ymin = conf.low, ymax = conf.high), alpha = 0.1)+
+    geom_point(data = tmpDatPlot,
+               aes(x=prop_pub, y = prop_y, shape = shape_type, col=oro_type),
+                             size=3, alpha = 0.25)+
+    ggrepel::geom_text_repel(data = tmpDatSums, aes(x=prop_pub, y = prop_y, label = oro_type), force = 0.3,
+                             size=3)+
+    ggrepel::geom_text_repel(data = pval, aes(label = label, fontface=3), 
+                             x=Inf, y=-Inf, hjust=1, vjust=0, col="black",
+                             size=3.5)+
+    scale_color_manual(
+      breaks = typeAES$level,
+      values = typeAES$colour
+    )+
+    scale_shape_manual(
+      breaks = levels(shapelookup$shape_type),
+      values = c(15, 16, 17)
+    ) +
+    guides(
+      color = guide_legend(override.aes = list(shape = as.numeric(as.character(shapelookup$shape_type[order(shapelookup$oro_type)])))),
+      shape = "none" 
+    )+
+    scale_x_continuous(expand = expansion(mult = c(0.15,0)))+
+    scale_y_continuous(expand = expansion(mult = c(0.15,0)))+
+    labs(
+      x = "Proportion of publications",
+      y = paste("Proportion of",tolower(componentAES$label[componentAES$level == components[c]])),
+      color = "ORO type"
+    )+
+    theme_minimal()+
+    theme(
+      axis.title = element_text(size=9),
+      plot.margin = unit(c(0.7,0.3,0.3,0.3),"cm")
+    )
+  
+  ggps_prop[[c]]
+  
+  leg <- ggpubr::get_legend(ggps_prop[[c]])
+  ggps_prop[[c]] <- ggps_prop[[c]]+theme(legend.position = "none")
+  
+
+ 
+  
+}
+
+modelResultsPropTable <- do.call("bind_rows", modelResultsProp)
+
+
+
+
+
+
+
+## save
+
+write.csv(
+  modelResultsPropTable,
+  here::here("outputs/publications_otherDim_glmResults_proportion.csv")
+)
+
+
+
+
+
+
+require(patchwork)
+
+
+ggps_prop_tagged <- mapply(
+  function(p, tag) p + 
+    labs(tag = tag) + 
+    theme(legend.position = "none",
+          plot.tag.position = c(0, 1.1),  # top-left like ggpubr
+          plot.tag = element_text(size = 10, hjust = 0, vjust = 1.2),
+          plot.margin = unit(c(1,0.3,0,0.3),"cm")
+          ),
+  ggps_prop,
+  paste0(letters[1:length(ggps_prop)], ") ", 
+         componentAES$label[match(names(ggps_prop), componentAES$level)]),
+  SIMPLIFY = FALSE
+)
+
+combined <- wrap_plots(ggps_prop_tagged, ncol = 2)
+
+
+# Combine plots with legend on the right
+final_plot <- combined + leg +theme(plot.margin = unit(c(0.1,0,0,0.1),"cm")) + 
+  plot_layout(ncol = 3, widths = c(4,4, 2), byrow=FALSE)  # adjust widths as needed
+
+
+ggsave(
+  filename = here::here("figures/main/GlmFitPlots_proportion.pdf"),
+  plot = final_plot,
+  width = 10,
+  height = 6.5
+)
+```
 
 
 ```{r fit glm proportional share of component ~ proportional share of publication*oro + year, eval = FALSE}
@@ -3312,6 +3475,9 @@ for(c in 1:length(components)){
     pivot_wider(names_from = component, values_from = total)
 
   tmpDat <- allComponentDat_model %>%
+    mutate(
+      y= round(y)
+    )%>%
     filter(component %in% c("publications", components[c])) %>%
     pivot_wider(names_from = component, values_from = y, id_cols = c("oro_type","year")) %>%
     left_join(tmpDat_annualSum, by = c("year"), suffix = c("","_total")) %>%
