@@ -78,9 +78,8 @@ dbDisconnect(p1_db)
 
 
 # how many relevant for each oro type?
-
 pubs <- predOroType %>%
-  filter(!is.na(year)) %>%
+  filter(!is.na(year), 0.5 <= mean_prediction) %>%
   group_by(level, year) %>%
   summarise(
     y = n_distinct(analysis_id)
@@ -123,7 +122,25 @@ ggplot(pubs, aes(x=year, y=y, alluvium=oro_type, fill=oro_type, colour=oro_type)
   theme_minimal()
 
 
+## All OROs together
+all_Pub <- predOroType %>%
+  filter(!is.na(year), 0.5 <= mean_prediction) %>%
+  group_by(year) %>%
+  summarise(
+    y = n_distinct(analysis_id)
+  )%>%
+  mutate(
+    component = "publications",
+    variable_name = "Publications (N)",
+    oro_type = "All mitigation OROs",
+    year= as.numeric(year)
+  ) %>%
+  select(all_of(colnames(pubs)))
+
+
+## Save
 save(pubs, file = here::here("data", "derived-data", "mitigationORO_pubs.RData"))
+save(all_Pub, file = here::here("data", "derived-data", "mitigationORO_pubs_allMitigationOROs.RData"))
 ```
 
 ```{r Load in number of O&C publications to calculate proportion?}
@@ -191,7 +208,7 @@ pubsProp <- pubs %>%
 
 ## Read in and format policy matches
 
-legDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
+all_legDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
   rename(country_name = Country_short, year=Year, oro_type = oroType) %>%
   filter(1975 < year,
          Binding.legislation == "True", 
@@ -213,11 +230,23 @@ legDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatche
      
       TRUE ~ "Other"
     )) %>%
-  filter(oro_type != "Other") %>%
-  # Tabulate all documents
+  filter(oro_type != "Other") 
+
+
+# Tabulate all documents
+legDat <- all_legDat %>%
   group_by(oro_type, year) %>%
   summarise(y = n_distinct(search_id)) %>%
   mutate(
+    component = "legislation",
+    variable_name = "Legislation (N)"
+  )
+
+all_legDat <- all_legDat %>%
+  group_by(year) %>%
+  summarise(y = n_distinct(search_id)) %>%
+  mutate(
+    oro_type = "All mitigation OROs",
     component = "legislation",
     variable_name = "Legislation (N)"
   )
@@ -245,14 +274,14 @@ pol_stackedBP
 
 ## save
 save(legDat, file = here::here("data", "derived-data", "n_legislation_docs.RData"))
-
+save(all_legDat, file = here::here("data", "derived-data", "n_legislation_docs_allMitigationOROs.RData"))
 ```
 
 ```{r read in non-binding policy documents}
 
 ## Read in and format policy matches
 
-polDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
+all_polDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
   rename(country_name = Country_short, year=Year, oro_type = oroType) %>%
   filter(1975 < year,
          Binding.legislation == "False", 
@@ -274,8 +303,10 @@ polDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatche
      
       TRUE ~ "Other"
     )) %>%
-  filter(oro_type != "Other") %>%
-  # Tabulate all documents
+  filter(oro_type != "Other")
+
+# Tabulate all documents
+polDat <- all_polDat %>%
   group_by(oro_type, year) %>%
   summarise(y = n_distinct(search_id)) %>%
   mutate(
@@ -283,6 +314,14 @@ polDat <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatche
     variable_name = "Non-binding policy (N)"
   )
 
+all_polDat <- all_polDat %>%
+  group_by(year) %>%
+  summarise(y = n_distinct(search_id)) %>%
+  mutate(
+    oro_type = "All mitigation OROs",
+    component = "non-binding policy",
+    variable_name = "Non-binding policy (N)"
+  )
 
 # # For 'MRE', add to both Located and Ocean
 # MRE_sub <- polDat[polDat$oro_type == "MRE",]
@@ -307,7 +346,7 @@ pol_stackedBP
 
 ## save
 save(polDat, file = here::here("data", "derived-data", "n_nonBindPolicy_docs.RData"))
-
+save(all_polDat, file = here::here("data", "derived-data", "n_nonBindPolicy_docs_allMitigationOROs.RData"))
 ```
 
 
@@ -695,6 +734,44 @@ save(postsDat, file=here::here("data/derived-data/mitigationPostsDat.RData"))
 ```
 
 
+```{r}
+
+all_postsDat <- read.csv(here::here("outputs/sentiment_predictions/sentiment_allCompiled_quantCols.csv")) %>%
+  distinct(post_id, .keep_all = TRUE) %>%
+  mutate(
+    post_date = as.Date(post_date),
+    year = as.numeric(format(post_date, "%Y"))
+  ) %>%
+  group_by(year) %>%
+  summarise(
+    `N posts (query-weighted)` = sum(qry_weight),
+    `N positive posts (query and like-weighted)` = sum(weight[post_sentiment == "positive"]),
+    `N negative posts (query and like-weighted)` = sum(weight[post_sentiment == "negative"])
+  )%>%
+  pivot_longer(
+    cols = c(`N posts (query-weighted)`,
+             `N positive posts (query and like-weighted)`,
+             `N negative posts (query and like-weighted)`
+             ),
+    names_to = "variable_name",
+    values_to = "y"
+  ) %>%
+  mutate(
+    component = case_when(
+      variable_name=="N posts (query-weighted)" ~ "public interest",
+      variable_name=="N positive posts (query and like-weighted)"~"public support",
+      variable_name=="N negative posts (query and like-weighted)"~"public opposition",
+      TRUE ~ "other"
+      ),
+    oro_type = "All mitigation OROs"
+  ) %>%
+  filter(component != "other", !is.na(year)) 
+    
+summary(all_postsDat)
+
+save(all_postsDat, 
+     file=here::here("data/derived-data/mitigationPostsDat_allMitigationOROs.RData"))
+```
 
 
 

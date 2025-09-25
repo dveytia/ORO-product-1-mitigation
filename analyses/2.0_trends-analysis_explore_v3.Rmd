@@ -1288,7 +1288,7 @@ knitr::include_graphics(here::here("figures/supplemental/mitigationDeploymentInd
 ```
 
 
-# Part 1: Narrative synthesis. Investigate drivers of break points
+# Narrative synthesis. Investigate drivers of break points
 
 *Key message*
 Key changes in policy/legislation, catalysed by the right socio-political environment, can have enormous impact on publication & action.
@@ -2791,10 +2791,10 @@ knitr::include_graphics(here::here("figures/main/allChangePointPlots.pdf"))
 
 
 
-# Part 2: Quantitative analysis
+# Quantitative analysis
 
 
-# 2.1: Match/mis-match (non-temporal)
+## Match/mis-match (non-temporal)
 
 *Key message* 
 Which OROs recieve more/less attention in policy, legislation and social media, given their number of publications?
@@ -3718,7 +3718,7 @@ ggpubr::ggarrange(
 knitr::include_graphics(here::here("figures/main/selectedGlmFitPlots.pdf"))
 ```
 
-## 2.2 Network analysis
+## Network analysis
 
 *Key message*
 Publications and public interest to be direct drivers of action, but that policy and legislation play an influential intermediary role
@@ -3765,7 +3765,7 @@ VL-TE Pipeline:
 * Do you notice any errors in the analysis/interpretation?
 
 ```{r VL-TE analysis, eval = FALSE}
-
+## Load in results in next chunk
 
 # Define levels to loop through
 
@@ -3848,7 +3848,9 @@ for(oro in oros){
     NodeY = edges[,2],
     TE_XCauseY = rep(NA, nrow(edges)),
     TE_pval = rep(NA, nrow(edges)),
-    TE_ratio = rep(NA, nrow(edges))
+    TE_ratio = rep(NA, nrow(edges)),
+    optDelay = rep(NA, nrow(edges)),
+    optCor = rep(NA, nrow(edges))
   )
   
   # Loop through the edges and test for causality
@@ -3864,16 +3866,27 @@ for(oro in oros){
         return(NULL)
       }
     )
+    
     if(is.null(TE_out)){
       edgesResults$TE_pval[e] <- NA
       edgesResults$TE_XCauseY[e] <- NA
       edgesResults$TE_ratio[e] <- NA
+      edgesResults$optDelay[e] <- NA
+      edgesResults$optCor[e] <- NA
     }else{
+      
+      ## Save outputs into data frame
       edgesResults$TE_pval[e] <- TE_out$pval
-      edgesResults$TE_XCauseY[e] <- TE_out$XgCsY_trns # TS$X causes TS$Y TRUE/FALSE
+      # TS$X causes TS$Y TRUE/FALSE
+      edgesResults$TE_XCauseY[e] <- TE_out$XgCsY_trns 
+      # Transfer entropy ratio -- If it is greater than one , then X causes Y.
       edgesResults$TE_ratio[e] <- TE_out$TEratio
+      # optimal time delay inferred by cross-correlation of X,Y. It is positive if Y is simply just a time-shift of X (e.g. Y[t]=X[t-optDelay]).
+      edgesResults$optDelay[e] <- TE_out$follOut$optDelay 
+      # optimal correlation of Y[t]=X[t-optDelay] for all t
+      # Maybe if optCor is negative, that can give me the sign 
+      edgesResults$optCor[e] <- TE_out$follOut$optCor
     }
-    
     
   }
   
@@ -3949,11 +3962,157 @@ Visualize the aggregated meta-network where:
 * Node color = node cluster (identified from hierarchical clustering)
 
 
+```{r group oro networks conceptually and plot combined networks }
+require(ggraph)
+require(tidygraph)
+
+
+
+## Get diagraph objects for each defined cluster
+# Create a data.frame for lookup
+concept_cluster_df <- data.frame(
+  oro_type = c(
+    "CDR-BC","CDR-BioPump","CDR-OAE",
+    "MRE-Bio","MRE-Located", "MRE-Ocean"
+  ),
+  cluster = c(rep(1,3),rep(2, 3))
+)
+
+# Or keep all?
+concept_cluster_df <- data.frame(
+  oro_type = c(
+    "CCS",
+    "CDR-BC","CDR-BioPump","CDR-OAE",
+    "Efficiency",
+    "MRE-Bio","MRE-Located", "MRE-Ocean"
+  ),
+  cluster = c(1,rep(2,3),3,rep(4,3))
+)
+
+n_clusters <- length(unique(concept_cluster_df$cluster))
+
+# List to hold one meta-graph per cluster
+concept_meta_graphs <- vector("list", n_clusters)
+concept_cluster_names <- vector("list", n_clusters)
+
+for (k in 1:n_clusters) {
+  # Get oro_types in this cluster
+  types_in_cluster <- concept_cluster_df %>%
+    filter(cluster == k) %>%
+    pull(oro_type)
+  
+  # Filter TE results for these oro_types and significant edges
+  cluster_te <- TE_results %>%
+    filter(oro_type %in% types_in_cluster, 
+           TE_pval <= 0.05,
+           !is.na(TE_ratio),
+           0 < TE_ratio
+           )
+  
+  # Aggregate TE_ratio per NodeX → NodeY pair
+  edge_summary <- cluster_te %>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      n_sig = n(),
+      avg_ratio = mean(TE_ratio, na.rm = TRUE),
+      avg_correlation = mean(optCor, na.rm=T),
+      avg_delay = mean(optDelay, na.rm=T),
+      sign = ifelse(avg_correlation >= 0, 1, -1),
+      .groups = 'drop'
+    )%>%
+    mutate(
+      relative_nsig = n_sig / max(n_sig)
+    )
+  
+  # Build igraph object
+  g <- graph_from_data_frame(edge_summary, directed = TRUE)
+  
+  # Set edge weights and labels
+  E(g)$weight <- edge_summary$avg_ratio
+  E(g)$width <- log1p(E(g)$weight) * 1.5
+  # E(g)$color <- scales::alpha("black", edge_summary$relative_nsig)
+  E(g)$color <- scales::alpha(ifelse(E(g)$avg_correlation >= 0, "#4dac26", "#d01c8b"),edge_summary$relative_nsig)
+
+  
+  concept_meta_graphs[[k]] <- g
+  concept_cluster_names[[k]] <- paste(types_in_cluster, collapse = ", ")
+}
+
+
+
+
+
+
+## Plot the networks of the oro types
+
+
+nodeTextSize <- 3.5
+titleSize <- 12
+
+
+
+# Convert network to ggplot
+plot_ggraph_network <- function(g, cluster_id, cluster_label) {
+  
+  # maybe plot separately by positive and negative so I can make arrows and dots?
+  g_tidy <- as_tbl_graph(g) 
+
+  ggraph(g_tidy, layout = "circle") +  # You can try "kk" or "circle" or "fr" for spacing
+    geom_edge_fan(aes(width = 1/log1p(weight), 
+                       alpha = relative_nsig ,
+                      label = scales::number(avg_delay, accuracy = 1),
+              
+                       color = color
+                       ),
+                   arrow = arrow(length = unit(7, 'mm')),
+                  end_cap = circle(5, 'mm'),
+                  # angle_calc = 'along',
+                   label_dodge = unit(2.5, 'mm'),
+                   show.legend = FALSE) +
+    
+    geom_node_point(size = 6, aes(color = name)) +
+    
+    scale_color_manual(values = componentAES$colour,
+                       breaks = componentAES$level, 
+                       guide="none")+
+    scale_edge_color_identity()+
+
+    geom_node_label(aes(label = componentAES$label[match(name, componentAES$level)]), repel = TRUE,
+                   size = nodeTextSize, alpha=0.8
+                   ) +
+
+    labs(title = paste(cluster_label)) +
+    theme_void() +
+    theme(
+      plot.title = element_text(size = titleSize, hjust = 0.5),
+      plot.margin = unit(c(5,5,5,5), units = "mm")
+      )
+}
+
+cluster_order <- 1:n_clusters
+concept_ggraph_plots <- lapply(cluster_order, function(k) {
+  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names[[k]])
+})
+
+
+
+
+library(patchwork)
+
+# Arrange the ggraph plots horizontally according to cluster number
+final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2)
+final_plot
+
+# Show or save
+ggsave(filename=here::here("figures/supplemental/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
+
+```
+
+
 
 ```{r Aggregate Causal Strengths Across oro_types - create meta network, eval = FALSE}
-
 meta_links <- TE_results %>%
-  filter(TE_pval < 0.05,TE_XCauseY==TRUE, !is.na(TE_ratio), TE_ratio > 0) %>%
+  filter(TE_pval <= 0.05,TE_XCauseY==TRUE, !is.na(TE_ratio), TE_ratio > 0) %>%
   group_by(NodeX, NodeY) %>%
   summarise(
     n_sig = n(),
