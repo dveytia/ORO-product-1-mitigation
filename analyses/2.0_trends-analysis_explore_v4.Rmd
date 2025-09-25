@@ -737,9 +737,8 @@ Visualize the aggregated meta-network where:
 
 * Edge width = mean TE ratio.
 * Edge transparency = consistency (e.g. normalized N significant).
-* Node color = node cluster (identified from hierarchical clustering)
+* Edge color = sign of correlation
 
-*REDO THIS AS DOTS AND ARROWS*
 ```{r group oro networks conceptually and plot combined networks}
 require(ggraph)
 require(tidygraph)
@@ -962,8 +961,8 @@ require(patchwork)
 final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2))
 final_plot
 
-# Show or save
-ggsave(filename=here::here("figures/supplemental/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
+# # Show or save
+# ggsave(filename=here::here("figures/supplemental/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
 
 ```
 
@@ -1085,27 +1084,6 @@ colnames(metaNetCentralityMetrics)[2] <- "Value"
 plot_ggraph_meta_network <- function(g, plotTitle=NULL, titleSize = 10, nodeTextSize = 3, dot_offset = 0.01) {
   g_tidy <- as_tbl_graph(g)
   
-  
-  # gg <- ggraph(g_tidy, layout = "circle") +  # You can try "kk" or "circle" or "fr" for spacing
-  #   geom_edge_link(aes(width = 1/log1p(weight), alpha = relative_nsig),
-  #                  arrow = arrow(length = unit(5, 'mm')),
-  #                  color = "black", show.legend = FALSE) +
-  #   # geom_node_point(size = 6, aes(color = as.factor(color))) +
-  #   geom_node_point(size = 7, aes(color = name))+
-  #   # scale_color_brewer(type = "qual", guide="none")+
-  #   scale_color_manual(values = componentAES$colour,
-  #                      breaks = componentAES$level, 
-  #                      guide="none")+
-  #   geom_node_label(aes(label = componentAES$label[match(name, componentAES$level)]), repel = TRUE, #nudge_x=0.1, nudge_y = 0.1
-  #                  size = nodeTextSize, alpha=0.8
-  #                  ) +
-  #   theme_void() +
-  #   theme(
-  #     plot.margin = unit(c(5,5,5,5), units = "mm")
-  #     )
-  # 
-  
-  ### new --------
   # Code for plotting dots at end of negative effects
   # --- Create layout (needed to access node positions) ---
   graph_layout <- create_layout(g_tidy, layout = "circle")
@@ -1258,12 +1236,12 @@ networkMetrics_ggp
 
 # ## combine plots
 # ggarrange(plotlist = list(metaNetwork_ggp, networkMetrics_ggp),
-#           labels = paste0(letters[1:2], ")"), 
+#           labels = paste0(letters[1:2], ")"),
 #           label.x = 0, vjust =1.2, font.label = list(size = 13)
 # )  %>%
 #   ggpubr::ggexport(filename = here::here("figures/supplemental/metaNetwork_Graph_and_MetricHeatmap.pdf"),
-#                    nrow = 1, 
-#            width = 10, height= 4.5)
+#                    nrow = 1,
+#            width = 10, height= 4)
 
 
 ```
@@ -1307,29 +1285,23 @@ addTaskCallback(function(...) {set.seed(123);TRUE})
 # Do we want to simulate with probability weights? T/F
 weightSimulation = FALSE
 # the threshold of agreement below which the edge is sample with a probability weight of 0.5
-uncertainThreshold = 1 
+uncertainThreshold = 0.5 
 oroTypes <- unique(allComponentDat_model$oro_type)
-qp_results_df <- data.frame()
+
 
 
 
 ## 1. Pool the transfer entropy results. 
-sig_te_edges <- TE_results %>%
-  filter(TE_XCauseY == TRUE,!is.na(TE_ratio)) %>%
-  group_by(NodeX, NodeY) %>%
-  summarise(
-    n_sig = n(),
-    .groups = 'drop'
-  )%>%
+sig_te_edges <- meta_links %>%
   mutate(
-    Probability = n_sig / max(n_sig),
-    Group = ifelse(uncertainThreshold <= Probability,0,1)
+    Probability = relative_nsig,
+    Group = ifelse(uncertainThreshold < Probability,0,1),
+    Type = ifelse(sign==1,"P","N")
   ) %>%
   arrange(desc(Probability)) %>%
-  select(From=NodeX, To=NodeY, Group, Probability) %>%
-  mutate(
-    Type = "P"
-  )
+  select(From=NodeX, To=NodeY, Group, Probability, Type)
+
+
 
 # Format the data frame for Q Press
 sig_nodes <- as.character(unique(c(sig_te_edges$From, sig_te_edges$To)))
@@ -1340,13 +1312,26 @@ sig_te_edges <- sig_te_edges %>%
     To = factor(To, levels=sig_nodes),
     Type = factor(Type, levels = c("N","P","U","Z")),
     # Group = factor(Group)
-  )
-sig_te_edges$Pair <- 1:nrow(sig_te_edges)
+  ) %>%
+  ungroup() %>%
+  ## add Pair
+  mutate(
+    # Convert From and To to character to avoid issues with factors
+    From_char = as.character(From),
+    To_char = as.character(To),
+    # Sort From and To alphabetically
+    PairKey = pmin(From_char, To_char),
+    PairKey = paste(PairKey, pmax(From_char, To_char), sep = "-")
+  ) %>%
+  mutate(Pair = as.integer(factor(PairKey)))
+
+
+
 
 allEdgesLabels <- edge.labels(sig_te_edges) 
   
 # Mod <- retain.groups(sig_te_edges, groups=0) # all certain interactions
-Mod <- enforce.limitation(sig_te_edges%>% select(-Probability)) # enforce self-limiting effect
+Mod <- enforce.limitation(sig_te_edges%>% select(From, To, Group, Type, Pair)) # enforce self-limiting effect
 # s<- community.sampler(Mod)
 # s$select(0.5)
 # ModSim <- system.simulate(100, Mod,sampler = s) # simulate
@@ -1356,14 +1341,20 @@ Mod <- enforce.limitation(sig_te_edges%>% select(-Probability)) # enforce self-l
 ## 2. Build Qualitative network model
 # Optional: Simulate with weights?
 if(weightSimulation){
-  uncertainSampleProbsDf <- sig_te_edges %>%
-  filter(Group == 1) %>%
-  select(Pair, Probability) %>%
-  distinct(Pair,.keep_all = TRUE)
+  # uncertainSampleProbsDf <- sig_te_edges %>%
+  # filter(Group == 1) %>%
+  # select(Pair, Probability) %>%
+  # distinct(Pair,.keep_all = TRUE)
 
-  ModSim <- my.system.simulate(nSims, Mod,required.groups = c(0), uncertainSampleProbsDf=uncertainSampleProbsDf)
+  # ModSim <- my.system.simulate(nSims, Mod,required.groups = c(0), uncertainSampleProbsDf=uncertainSampleProbsDf)
+
+  # Or uncertain with probability
+  s <- community.sampler(Mod)
+  s$select(mean(uncertainSampleProbsDf$Probability))
+  ModSim <- system.simulate(nSims, Mod, s)
+ 
 }else{
-  ModSim <- system.simulate(100, Mod)
+  ModSim <- system.simulate(nSims, Mod)
 }
 
 
@@ -1371,7 +1362,7 @@ if(weightSimulation){
 
 # Loop over interventions on each node → observe effect on "deployment"
 all_nodes <- sig_nodes[sig_nodes != "deployment"]
-
+qp_results_df <- data.frame()
 for (node in all_nodes) {
   press <- c(1)
   names(press) <- node
@@ -1395,11 +1386,16 @@ for (node in all_nodes) {
 # Plot results
 uniquePP <- unique(qp_results_df$Press_perturb)
 
-qnm_ggp <- ggplot(qp_results_df %>% filter(Positive>0), 
-       aes(x=Press_perturb, y=stringr::str_wrap(cluster, width=10), fill = Positive))+
-  geom_tile()+
-  scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=5, colours = viridis(5))+
-  # scale_fill_steps2(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=4,midpoint = 50)+
+qnm_ggp <- ggplot(qp_results_df, 
+       aes(x=Press_perturb))+
+  geom_col(aes(y=Positive), fill="#4dac26")+ 
+  geom_col(aes(y=-Negative), fill = "#d01c8b")+
+  
+  geom_text(aes(y=Positive, label = Positive), vjust=0)+
+  geom_text(aes(y=-Negative, label = Negative), vjust=1)+
+  
+  geom_hline(yintercept=0, col="red")+
+  # scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=5, colours = viridis(5))+
   scale_x_discrete(
     breaks = componentAES$level[
       componentAES$level %in% uniquePP
@@ -1408,8 +1404,9 @@ qnm_ggp <- ggplot(qp_results_df %>% filter(Positive>0),
       componentAES$level %in% uniquePP
     ]
   )+
-  labs(y="Meta-network",x="Press perturbation")+
-  theme_bw()+
+  scale_y_continuous(expand = expansion(mult=0.15))+
+  labs(y="Effect on action (% sims)",x="Press perturbation")+
+  theme_minimal(base_size = 10)+
   theme(
     legend.position = "bottom",
     axis.text.y = element_blank(),
@@ -1420,25 +1417,102 @@ qnm_ggp <- ggplot(qp_results_df %>% filter(Positive>0),
 qnm_ggp
 
 
-# ## Save plot
-# ggsave(
-#   here::here("figures/supplemental/qp_metaNetwork_heatmap.pdf"),
-#   plot = qnm_ggp,
-#   width=5, height=4, units="in"
-# )
+## Save plot
+ggsave(
+  here::here("figures/supplemental/qp_metaNetwork_barplot.pdf"),
+  plot = qnm_ggp,
+  width=5, height=4, units="in"
+)
+
+```
+
+```{r try with only certain edges but doesnt work it freezes}
+# ### Recalculate with only most certain edges - doesnt work freezes --------
+# sig_te_edges_cert <- sig_te_edges %>%
+#   filter(Group == 0) 
+# 
+# allEdgesLabels_cert <- edge.labels(sig_te_edges) 
+#   
+# Mod_cert <- retain.groups(sig_te_edges, groups=0) # all certain interactions
+# ModSim_cert <- system.simulate(nSims, Mod_cert)
+# 
+# all_nodes_cert <- node.labels(Mod_cert)
+# all_nodes_cert <- all_nodes_cert[all_nodes_cert != "deployment"]
+# 
+# qp_results_df_cert <- data.frame()
+# for (node in all_nodes_cert) {
+#   press <- c(1)
+#   names(press) <- node
+# 
+#   # Set evidence and query deployment
+#   temp <- impact.barplot.myMod(ModSim_cert,
+#       perturb = press,
+#       plot=FALSE, percentage = TRUE
+#   )
+#   temp <- as.data.frame(t(temp["deployment",]))
+#   temp$cluster <- "Meta-network"
+#   temp$Press_perturb <- node
+#   
+#   qp_results_df_cert <- qp_results_df_cert %>% bind_rows(temp)
+#   
+# }
+# 
+#  
+# 
+# ## Results
+# # Plot results
+# uniquePP_cert <- unique(qp_results_df_cert$Press_perturb)
+# 
+# qnm_cert_ggp <- ggplot(qp_results_df_cert, 
+#        aes(x=Press_perturb))+
+#   geom_col(aes(y=Positive))+
+#   geom_col(aes(y=-Negative))+
+#   
+#   geom_text(aes(y=Positive, label = Positive), vjust=0)+
+#   geom_text(aes(y=-Negative, label = Negative), vjust=1)+
+#   
+#   geom_hline(yintercept=0, col="red")+
+#   # scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=5, colours = viridis(5))+
+#   scale_x_discrete(
+#     breaks = componentAES$level[
+#       componentAES$level %in% uniquePP
+#     ],
+#     labels = componentAES$label[
+#       componentAES$level %in% uniquePP
+#     ]
+#   )+
+#   scale_y_continuous(expand = expansion(mult=0.15))+
+#   labs(y="Effect on action (% sims)",x="Press perturbation")+
+#   theme_minimal(base_size = 10)+
+#   theme(
+#     legend.position = "bottom",
+#     axis.text.y = element_blank(),
+#     axis.ticks.y = element_blank(),
+#     axis.text.x=element_text(angle=45, hjust=1)
+#   )
+# 
+# qnm_ggp_cert
+
+
+
 ```
 
 
 ```{r plot all network figures together, eval = FALSE}
 
-# plotList = list(metaNetwork_ggp+theme(plot.margin = unit(rep(0.1, 4), "cm")), 
-#                 networkMetrics_ggp+theme(plot.margin = unit(rep(0.1, 4), "cm")), 
-#                 qnm_ggp+theme(plot.margin = unit(rep(0.1, 4), "cm")))
-# 
-# combined_patchwork <- wrap_plots(plotList, ncol = 2, heights = c(1,0.75)) + plot_annotation(tag_levels = 'a')
-# 
-# ggsave(here::here("figures/main/metaNetwork_networkMetricHeatmap_QNMHeatmap.pdf"),
-#        combined_patchwork, width = 10, height = 9)
+plotList = list(A=metaNetwork_ggp+theme(plot.margin = unit(rep(0.1, 4), "cm")), 
+                B=networkMetrics_ggp+theme(plot.margin = unit(rep(0.2, 4), "cm")),
+                C=qnm_ggp+theme(plot.margin = unit(rep(0.1, 4), "cm")))
+
+pltLayout <- "#AA#
+              BBCC"
+
+combined_patchwork <- wrap_plots(plotList, ncol = 2, heights = c(1.25,1), 
+                                 widths = c(0.05,0.5,0.5,0.4), #c(0.8,1), 
+                                 design = pltLayout) + plot_annotation(tag_levels = 'a')
+
+ggsave(here::here("figures/main/metaNetwork_networkMetricHeatmap_QNMbarplot.pdf"),
+       combined_patchwork, width = 9, height = 8)
 
 ```
 
