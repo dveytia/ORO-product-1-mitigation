@@ -121,7 +121,8 @@ load(file=here::here("data/derived-data/mitigationPostsDat_allMitigationOROs.RDa
 year_lim <- c(2000, 2024) # years to analyse
 
 # components to analyse
-selectedComponents <- c("publications", "deployment","policy","legislation","public interest","public support") # "public opposition"
+# Remove public support because it was derived from interest, and picked the most robust metric?
+selectedComponents <- c("publications", "deployment","policy","legislation","public interest","public support") #  "public opposition"
 
 # bind all data together
 allComponentDat_model <- pubs %>%
@@ -164,151 +165,6 @@ Mitigation ORO publication effort is weighted towards marine renewable energy (o
 
 
 Skip the code and just run the chunk to visualize at the end
-
-```{r barplot of n publications by outcome type, eval = FALSE}
-
-p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
-                      here::here("data","sqlite-databases","product1.sqlite"),
-                                 create=FALSE)
-error_bars <- tbl(p1_db, "pred_oro_type_mit_long") %>%
-  group_by(level)%>%
-  summarise(
-    n_lower = n_distinct(analysis_id[0.5 <= (mean_prediction - std_prediction)]),
-    n_mean = n_distinct(analysis_id[0.5 <= (mean_prediction)]),
-    n_upper = n_distinct(analysis_id[0.5 <= (mean_prediction + std_prediction)])
-  )%>%
-  collect()%>%
-  mutate(
-    oro_type = gsub("[.]","-",level)
-  )
-
-
-predOroType <- tbl(p1_db, "pred_oro_type_mit_long") %>%
-  # filter(0.5 <= mean_prediction) %>%
-  rename(oro_type = level) %>%
-  select(analysis_id, oro_type, mean_prediction, std_prediction) %>%
-  mutate(
-    lower_prediction = mean_prediction-std_prediction,
-    upper_prediction = mean_prediction+std_prediction
-  )
-  # left_join(uniquerefs, by = "analysis_id") %>%
-  # collect()
-
-pred_effective <- tbl(p1_db, "pred_outcome_effectiveness")%>% 
-  filter(0.5 <= mean_prediction) %>%
-  rename(effective_mean_pred = mean_prediction) %>%
-  select(analysis_id, effective_mean_pred)
-  # collect()
-
-pred_quant <- tbl(p1_db, "pred_outcome_quantitative")%>% 
-  filter(0.5 <= mean_prediction) %>%
-  rename(quantitative_mean_pred = mean_prediction) %>%
-  select(analysis_id, quantitative_mean_pred) 
-  # collect()
-
-pred_primary <- tbl(p1_db, "pred_primary_research") %>% 
-  filter(0.5 <= mean_prediction) %>%
-  rename(primary_mean_pred = mean_prediction) %>%
-  select(analysis_id, primary_mean_pred)
-  # collect()
-
-outcome_df <- predOroType %>%
-  left_join(pred_primary) %>%
-  left_join(pred_quant) %>%
-  left_join(pred_effective) %>%
-  collect()%>%
-  mutate(across(contains("_mean_pred"), function(x) ifelse(x < 0.5 | is.na(x), FALSE, TRUE)),
-         across(contains("_prediction"), function(x) ifelse(0.5<= x | is.na(x), TRUE, FALSE)),
-         oro_type = factor(
-           gsub("[.]","-", oro_type),
-           levels = typeAES$level,
-           labels = typeAES$label
-         )
-         )
-
-
-outcome_df_bars <- outcome_df%>%
-  group_by(oro_type) %>%
-  summarise(
-    n_mean = n_distinct(analysis_id[mean_prediction==TRUE]),
-    n_lower = n_distinct(analysis_id[lower_prediction==TRUE]),
-    n_upper = n_distinct(analysis_id[upper_prediction==TRUE]),
-    n_secondary = n_distinct(analysis_id[mean_prediction==TRUE &
-                                          primary_mean_pred != TRUE & 
-                                          quantitative_mean_pred != TRUE & 
-                                          effective_mean_pred != TRUE]),
-    n_primary = n_distinct(analysis_id[mean_prediction==TRUE &
-                                         primary_mean_pred== TRUE & 
-                                          quantitative_mean_pred != TRUE & 
-                                          effective_mean_pred != TRUE]),
-    n_quantitative = n_distinct(analysis_id[mean_prediction==TRUE &
-                                              primary_mean_pred == TRUE& 
-                                          quantitative_mean_pred == TRUE & 
-                                          effective_mean_pred != TRUE]),
-    n_effective = n_distinct(analysis_id[mean_prediction==TRUE &
-                                           primary_mean_pred == TRUE& 
-                                          quantitative_mean_pred == TRUE& 
-                                          effective_mean_pred == TRUE])
-  )
-
-outcome_df %>%
-  group_by(oro_type)%>%
-  summarise(
-    ntotal = n_distinct(analysis_id)
-  )
-
-outcome_error <- outcome_df_bars %>%
-  select(oro_type, n_mean, n_lower, n_upper)
-
-outcome_df_bars_long <- outcome_df_bars %>%
-  select(-n_mean, -n_lower, -n_upper)%>%
-  pivot_longer(cols = starts_with(c("n_")), names_to = "prediction_type", values_to = "value") %>%
-  mutate(
-    prediction_type = factor(gsub(".*_","", prediction_type), 
-                             levels = rev(c("secondary","primary", "quantitative", "effective")),
-                             labels = rev(c("Secondary","Primary - Other", 
-                                            "Quantitative - Other", "Quantitative Effectiveness")))
-  )
-
-
-
-
-
-# Plot
-outcomes_ggp <- ggplot(outcome_df_bars_long, 
-                       aes(x = oro_type, y = value, fill = prediction_type)) +
-  geom_col(position = "stack") +
-  geom_errorbar(data = outcome_error, aes(x = oro_type, ymin = n_lower, ymax = n_upper),
-                width = .2,
-                inherit.aes = FALSE)+
-  scale_fill_brewer(type = "qual")+
-  guides(fill=guide_legend(nrow=4))+
-  labs(
-    x = "ORO type",
-    y="N articles (mean)",
-    fill = "Outcome type"
-  ) +
-  theme_minimal(base_size = 10) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "bottom"
-    )
-outcomes_ggp
-
-
-# # save counts to table
-# write.csv(outcome_error %>%
-#             rename(`ORO type` = oro_type,
-#                    `N (mean)`=n_mean,
-#                    `N (lower)`=n_lower,
-#                    `N (upper)`=n_upper,
-#                    ),
-#           file = here::here("outputs/oroTypePredictionCounts.csv"))
-
-DBI::dbDisconnect(p1_db)
-```
-
-
 
 What was driving the inflection in the mitigation ORO branch? A particular ORO or a particular affiliation?
 ```{r plot publication timeseries -- MRE-Ocean is driving inflection, eval = FALSE}
@@ -409,15 +265,211 @@ oroTimeseries_ggp
 ```
 
 
-```{r outcome type barplot vs oro timeseries  plots, eval = FALSE}
 
-# ggarrange(plotlist = list(outcomes_ggp, oroTimeseries_ggp),
-#           nrow=1, labels = letters[1:2], align = "v", widths = c(1,1.7)) %>%
-#   ggexport(
-#     filename = here::here("figures/supplemental/oro_outcome_and_timeseries.pdf"),
-#     width = 8, height = 5
-#   )
+```{r introduce complementary data - plot proportions by oro type, eval = FALSE}
+
+## Publications
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+uniquerefs <- tbl(p1_db, "uniquerefs_update2025") %>%
+  select(analysis_id, year) 
+
+predOroTypeYear <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+  left_join(uniquerefs, by = "analysis_id") %>%
+  filter(!is.na(year)) %>%
+  group_by(level, year) %>%
+  summarise(
+    N = n_distinct(analysis_id[0.5 <= (mean_prediction)])
+  ) %>%
+  collect()%>%
+  mutate(
+    year = as.numeric(year),
+    oro_type = gsub("[.]","-",level),
+    component = "publications",
+    variable_name = "Publications (N)"
+  ) %>%
+  select(oro_type, component, variable_name, year, N)
+
+nPubs_oro <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+  group_by(level)%>%
+  summarise(
+    N = n_distinct(analysis_id[0.5 <= (mean_prediction)])
+  )%>%
+  collect()%>%
+  mutate(
+    oro_type = gsub("[.]","-",level),
+    component = "publications",
+    variable_name = "Publications (N)"
+  ) %>%
+  select(oro_type, component, variable_name, N)
+
+dbDisconnect(p1_db)
+
+
+
+## Sumarise by component overall proportional shar of each ORO
+prop_oro_summary_df <- allComponentDat_model %>%
+  filter(!(component %in% c("deployment","publications"))) %>%
+  group_by(component, variable_name, oro_type) %>%
+  summarise(
+    N = sum(y, na.rm=T)
+  ) %>%
+  bind_rows(
+    nPubs_oro
+  ) %>%
+  group_by(component) %>%
+  mutate(
+    total_component = sum(N, na.rm=T)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    prop_component = N/total_component,
+    component = factor(component, 
+                       levels = componentAES$level, 
+                       labels = componentAES$label_varname)
+  )%>%
+  mutate(
+    component = droplevels(component)
+  )
+  
+prop_oro_summary_df
+
+
+# Plot proportion of each dimension per ORO
+dist_component_ggp <- ggplot(data = prop_oro_summary_df, aes(x=component))+
+  geom_col(aes(y=prop_component, fill=oro_type), position="stack")+
+  geom_text(aes(label = scales::number(total_component, accuracy = 1, big.mark = ",")), check_overlap = TRUE, vjust=0, y=1)+
+  scale_fill_manual(
+    breaks = typeAES$level,
+    values = typeAES$colour
+  )+
+  scale_y_continuous(expand = expansion(mult=c(0,0.1)))+
+  labs(
+    x="Dimension (i.e. Node)",
+    y="Proportion",
+    fill="ORO type"
+  )+
+  guides(fill=guide_legend(ncol=2))+
+  theme_minimal(base_size = 10)+
+  theme(
+    axis.text.x = element_text(angle=45, hjust=1)
+  )
+
+dist_component_ggp
+
+
+## Plot the time series as well
+year_oro_summary_df <- allComponentDat_model %>%
+  filter(!(component %in% c("deployment","publications"))) %>%
+  group_by(component, variable_name, oro_type, year) %>%
+  summarise(
+    N = sum(y, na.rm=T)
+  ) %>%
+  bind_rows(
+    predOroTypeYear
+  ) %>%
+  filter(
+    year_lim[1] <= year, year <= year_lim[2]
+  ) %>%
+  group_by(component, year) %>%
+  mutate(
+    total_component = sum(N, na.rm=T)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    prop_component = N/total_component,
+    component = factor(component, 
+                       levels = componentAES$level, 
+                       labels = componentAES$label_varname)
+  )%>%
+  mutate(
+    component = droplevels(component)
+    # component = fct_recode(component, "Publications (log(N))"="Publications (N)")
+  )%>%
+  select(oro_type, component, year, prop_component, N) 
+  
+
+
+# Annual plot of each dimension per ORO
+year_component_ggp <- ggplot(data = year_oro_summary_df, aes(x=year))+
+  facet_wrap(vars(component), ncol=1, scales = "free_y")+
+  geom_area(aes(y=N, fill=oro_type), position="stack")+
+  scale_fill_manual(
+    breaks = typeAES$level,
+    values = typeAES$colour
+  )+
+  scale_y_continuous(expand = expansion(mult=c(0,0.1)))+
+  labs(
+    x="Year",
+    y="N",
+    fill="ORO type"
+  )+
+  theme_minimal(base_size = 10)+
+  theme(
+    legend.position = "bottom"
+  )
+
+year_component_ggp
+
+year_component_prop_ggp <- ggplot(data = year_oro_summary_df, aes(x=year))+
+  facet_wrap(vars(component), ncol=1, scales = "free_y")+
+  geom_col(aes(y=prop_component, fill=oro_type), position="stack", width=1)+
+  scale_fill_manual(
+    breaks = typeAES$level,
+    values = typeAES$colour
+  )+
+  labs(
+    x="Year",
+    y="Proportion",
+    fill="ORO type"
+  )+
+  theme_minimal(base_size = 10)+
+  theme(
+    legend.position = "bottom"
+  )
+
+year_component_prop_ggp
+
+oro_leg <- ggpubr::get_legend(dist_component_ggp)
+
+
+
+plotList <- list(
+  dist_component_ggp+theme(plot.margin = unit(rep(0.1, 4),"cm")),
+  year_component_ggp+
+    theme(legend.position = "none",
+          plot.margin = unit(rep(0.1, 4),"cm")
+          ),
+  year_component_prop_ggp+
+    theme(legend.position = "none",
+          plot.margin = unit(rep(0.1, 4),"cm")
+          )
+)
+
+plotLay <- 
+"#AA#
+BBCC"
+
+combined <- wrap_plots(plotList,
+                       design = plotLay,
+                       widths = c(1,5,0.2,0.2),
+                       heights = c(1,2)
+                       )+
+  plot_annotation(tag_levels = "a")
+
+
+ggsave(
+  here::here("figures/main/distribution_by_component_plots.pdf"),
+  width=6.5, height=7,
+  plot = combined
+)
+
 ```
+
+
+
 
 
 ```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("Distribution of N publications (predicted relevant by LLM classifier)"), echo=FALSE}
@@ -721,7 +773,7 @@ load(here::here("data/derived-data/TE_results.RData")) # TE_results, TE_results_
 
 
 
-### Step 2: Create Network from TE edges
+### Step 2.1: Create Network by ORO group from TE edges
 
 Aggregate Causal edges (identified from transfer entropy) Across oro_types
 
@@ -803,7 +855,7 @@ for (k in 1:n_clusters) {
       .groups="drop"
     )%>%
     mutate(
-      relative_nsig = n_sig / max(n_sig)
+      relative_nsig = n_sig / max(n_sig, na.rm=T)
     )
   
   # Build igraph object
@@ -969,9 +1021,315 @@ final_plot
 Negatvive Leg -> support -> action could actually be a direct effect of Leg -> action?
 
 
+```{r for mCDR and MRE calculate node importance and influence}
+plot_network_metrics <- function(network_graph){
+  # causal influencers - legislation, policy
+  influencers <- degree(network_graph, mode = "out") %>% 
+    sort(decreasing = T) %>% 
+    as.data.frame() %>%
+    tibble::rownames_to_column("component") %>%
+    mutate(metric = "Out-degree (N effects given)")
+    
+  # causal responders - deployment - 8
+  responders <- degree(network_graph, mode = "in") %>% 
+    sort(decreasing = T) %>% 
+    as.data.frame() %>%
+    tibble::rownames_to_column("component") %>%
+    mutate(metric = "In-degree (N effects received)")
+  
+  
+  # general influence - legislation                    policy           public interest
+  eigenvalues <- sort(eigen_centrality(network_graph)$vector, decreasing =TRUE)  %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("component") %>%
+    mutate(metric = "Eigenvector centrality")
+  
+  # mediators - deployment - 14
+  mediators <- sort(betweenness(network_graph), decreasing=TRUE)%>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("component") %>%
+    mutate(metric = "Betweenness (N shortest paths)")
+  
+  
+  ## format results 
+  metaNetCentralityMetrics_tmp <- rbind(
+    influencers,
+    responders,
+    eigenvalues,
+    mediators
+  )%>%
+    mutate(
+      component = factor(
+        component, 
+        levels = componentAES$level[componentAES$level %in% selectedComponents],
+        labels = componentAES$label[componentAES$level %in% selectedComponents]
+      )
+    )%>%
+    complete(component, metric)
+  
+  summary(metaNetCentralityMetrics_tmp)
+  
+  colnames(metaNetCentralityMetrics_tmp)[!(colnames(metaNetCentralityMetrics_tmp) %in% c("component","metric"))] <- "Value"
+  
+  ## make plot
+  ## Plot of a heatmap of each metric value
+  networkMetricstmp_ggp <- ggplot(
+    data = metaNetCentralityMetrics_tmp %>%
+      group_by(metric) %>%
+      mutate(
+        Value_scaled = scales::rescale(Value, to = c(0,1))
+      ),
+    aes(x=component, y=metric)
+  )+
+    geom_tile(aes(fill = Value_scaled))+
+    # geom_text(aes(label = scales::number(Value, accuracy=0.1)))+
+    scale_y_discrete(
+      labels = function(x) stringr::str_wrap(x, width=15)
+    )+
+    scale_x_discrete(
+      breaks = levels(metaNetCentralityMetrics_tmp$component),
+      drop=FALSE
+    )+
+    scale_fill_distiller(palette = "Blues", direction=1, na.value = "grey")+
+    labs(
+      x = "Node",
+      y="Network metric",
+      fill = "Metric\n(scaled)"
+    )+
+    theme_minimal(base_size = 12)+
+    theme(
+      axis.text.x = element_text(angle = 45, hjust=1)
+      # legend.position = "bottom"
+    )
+  # networkMetricstmp_ggp
+  return(networkMetricstmp_ggp)
+}
+
+
+concept_metrics_heatmaps <- lapply(c(2,4), function(k) {
+  plot_network_metrics(concept_meta_graphs[[k]])
+})
+
+
+```
+
+```{r for mCDR and MRE compute QNM but remove because no feedbacks so results not informative, eval=FALSE}
+
+source(here::here("R/impact.barplot.myMod"))
+source(here::here("R/extend.vector"))
+source(here::here("R/my.QPress.R"))
+addTaskCallback(function(...) {set.seed(123);TRUE})
+
+# Function to run press perturbation with timeout if it freezes
+safe_impact_barplot <- function(ModSim, press, timeout = 30) {
+  tryCatch(
+    withTimeout(
+      {
+        impact.barplot.myMod(ModSim,
+            perturb = press,
+            plot=FALSE, percentage = TRUE
+        )
+      },
+      timeout = timeout,
+      onTimeout = "silent"   # do not throw error on timeout
+    ),
+    error = function(e) NULL,
+    TimeoutException = function(e) NULL
+  )
+}
+
+plot_QNM <- function(k, nSims = 5000, weightSimulation = FALSE, uncertainThreshold=0.5){
+  
+  # Get oro_types in this cluster
+  oroTypes <- concept_cluster_df %>%
+    filter(cluster == k) %>%
+    pull(oro_type)
+
+  ## 1. Pool the transfer entropy results
+  sig_te_edges <- TE_results %>%
+    filter(oro_type %in% oroTypes,
+           NodeX %in% selectedComponents,
+             NodeY %in% selectedComponents,
+             TE_pval <= 0.05,
+             !is.na(TE_ratio),
+             0 < TE_ratio
+             ) %>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      n_sig = n(),
+      avg_ratio = mean(TE_ratio, na.rm = TRUE),
+      avg_correlation = mean(optCor, na.rm=T),
+      med_correlation = quantile(optCor, na.rm=T, probs = 0.5),
+      avg_delay = mean(optDelay, na.rm=T),
+      sign = ifelse(avg_correlation >= 0, 1, -1),
+      oro_types = paste(unique(oro_type), collapse = ", "), 
+      .groups = 'drop'
+    )%>%
+    mutate(
+      Probability = n_sig / max(n_sig),
+      Group = ifelse(uncertainThreshold < Probability,0,1),
+      Type = ifelse(sign==1,"P","N")
+    ) %>%
+    arrange(desc(Probability)) %>%
+    select(From=NodeX, To=NodeY, Group, Probability, Type)
+  
+
+  
+  
+  
+  # Format the data frame for Q Press
+  sig_nodes <- as.character(unique(c(sig_te_edges$From, sig_te_edges$To)))
+  
+  sig_te_edges <- sig_te_edges %>%
+    mutate(
+      From = factor(From, levels = sig_nodes),
+      To = factor(To, levels=sig_nodes),
+      Type = factor(Type, levels = c("N","P","U","Z")),
+      # Group = factor(Group)
+    ) %>%
+    ungroup() %>%
+    ## add Pair
+    mutate(
+      # Convert From and To to character to avoid issues with factors
+      From_char = as.character(From),
+      To_char = as.character(To),
+      # Sort From and To alphabetically
+      PairKey = pmin(From_char, To_char),
+      PairKey = paste(PairKey, pmax(From_char, To_char), sep = "-")
+    ) %>%
+    mutate(Pair = as.integer(factor(PairKey)))
+  
+  
+  
+  
+  allEdgesLabels <- edge.labels(sig_te_edges) 
+  
+  Mod <- enforce.limitation(sig_te_edges%>% select(From, To, Group, Type, Pair)) 
+  
+  
+  ## 2. Build Qualitative network model
+  # Optional: Simulate with weights?
+  if(weightSimulation){
+    s <- community.sampler(Mod)
+    s$select(mean(uncertainSampleProbsDf$Probability))
+    ModSim <- tryCatch(
+      {system.simulate(nSims, Mod, s)},
+      error = function(e){NULL}
+    )
+   
+  }else{
+    ModSim <- tryCatch(
+      {system.simulate(nSims, Mod)},
+      error = function(e){NULL}
+    )
+  }
+  
+  ## If Mod sim Null, return nothing, else calculate presses
+  if(is.null(ModSim)){
+    return(NULL)
+  }else{
+    
+    ## 3. For each node (except action), simulate a press perturbation and record the response of action.
+  
+    # Loop over interventions on each node → observe effect on "deployment"
+    all_nodes <- sig_nodes[sig_nodes != "deployment"]
+    qp_results_df <- data.frame()
+    for (node in all_nodes) {
+      press <- c(1)
+      names(press) <- node
+    
+      # Set evidence and query deployment
+      temp <- safe_impact_barplot(ModSim, press, timeout = 30)
+      if(is.null(temp)){
+        return(tibble(Negative=NA, `No Change`=NA, Positive=NA, Press_perturb=node))
+      }else{
+        temp <- as.data.frame(t(temp["deployment",]))
+        temp$Press_perturb <- node
+      }
+      
+      qp_results_df <- qp_results_df %>% bind_rows(temp)
+      
+    } # end of calculating presses
+    
+    
+
+    # Plot results
+    uniquePP <- unique(qp_results_df$Press_perturb)
+    
+    qnm_ggp <- ggplot(qp_results_df, 
+           aes(x=Press_perturb))+
+      geom_col(aes(y=Positive), fill="#4dac26")+ 
+      geom_col(aes(y=-Negative), fill = "#d01c8b")+
+      
+      geom_text(aes(y=Positive, label = Positive), vjust=0)+
+      geom_text(aes(y=-Negative, label = Negative), vjust=1)+
+      
+      geom_hline(yintercept=0, col="red")+
+      # scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=5, colours = viridis(5))+
+      scale_x_discrete(
+        breaks = componentAES$level[
+          componentAES$level %in% uniquePP
+        ],
+        labels = componentAES$label[
+          componentAES$level %in% uniquePP
+        ]
+      )+
+      scale_y_continuous(expand = expansion(mult=0.15))+
+      labs(y="Effect on action (% sims)",x="Positive press perturbation node")+
+      theme_minimal(base_size = 10)+
+      theme(
+        legend.position = "bottom",
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x=element_text(angle=45, hjust=1)
+      )
+    
+    return(qnm_ggp)
+    
+  } # end of !is.null(ModSim)
+  
+    
+}
+
+
+concept_qnm_barplots <- lapply(c(2,4), function(k){
+  plot_QNM(k=k)
+})
+
+```
+
+
+```{r plot analysis for mCDR and MRE OROs}
+
+plotList <- c(
+  concept_ggraph_plots[[2]],
+  concept_metrics_heatmaps[[1]],
+  concept_ggraph_plots[[4]],
+  concept_metrics_heatmaps[[2]]
+)
+
+combined <- wrap_plots(plotList, ncol=2, axes = "collect_x", 
+                       guides="collect", widths = c(2, 1))+
+  plot_annotation(tag_levels = "a")
+
+ggsave(
+  here::here("figures/supplemental/networks_mCDR_MRE.pdf"),
+  width=9, height=8, 
+  plot=combined
+)
+
+```
+
+### Step 2.2: Create Network for ALL OROs from TE edges
+
 ```{r Aggregate Causal Strengths Across all oros - create meta network, eval = FALSE}
 meta_links <- TE_results %>%
-  filter(TE_pval <= 0.05,TE_XCauseY==TRUE, !is.na(TE_ratio), TE_ratio > 0) %>%
+  filter(NodeX %in% selectedComponents,
+           NodeY %in% selectedComponents,
+           TE_pval <= 0.05,
+           !is.na(TE_ratio),
+           0 < TE_ratio
+           ) %>%
   group_by(NodeX, NodeY) %>%
   summarise(
     n_sig = n(),
@@ -1060,20 +1418,20 @@ metaNetCentralityMetrics <- rbind(
 colnames(metaNetCentralityMetrics)[2] <- "Value"
 
 
-# ## Save results
-# metaNetCentralityMetricsSummary <- metaNetCentralityMetrics %>%
-#   group_by(metric) %>%
-#   slice_max(n=3,order_by = Value)
-# 
-# write.csv(
-#   metaNetCentralityMetricsSummary,
-#   file = here::here("outputs/metaNetworkMetrics_summary.csv")
-# )
-# 
-# write.csv(
-#   metaNetCentralityMetrics,
-#   file = here::here("outputs/metaNetworkMetrics_all.csv")
-# )
+## Save results
+metaNetCentralityMetricsSummary <- metaNetCentralityMetrics %>%
+  group_by(metric) %>%
+  slice_max(n=3,order_by = Value)
+
+write.csv(
+  metaNetCentralityMetricsSummary,
+  file = here::here("outputs/metaNetworkMetrics_summary.csv")
+)
+
+write.csv(
+  metaNetCentralityMetrics,
+  file = here::here("outputs/metaNetworkMetrics_all.csv")
+)
 
 
 ```
@@ -1222,7 +1580,7 @@ networkMetrics_ggp <- ggplot(
   )+
   scale_fill_distiller(palette = "Blues", direction=1)+
   labs(
-    x = "",
+    x = "Node",
     y="Network metric",
     fill = "Metric\n(scaled)"
   )+
@@ -1234,14 +1592,14 @@ networkMetrics_ggp <- ggplot(
 networkMetrics_ggp
 
 
-# ## combine plots
-# ggarrange(plotlist = list(metaNetwork_ggp, networkMetrics_ggp),
-#           labels = paste0(letters[1:2], ")"),
-#           label.x = 0, vjust =1.2, font.label = list(size = 13)
-# )  %>%
-#   ggpubr::ggexport(filename = here::here("figures/supplemental/metaNetwork_Graph_and_MetricHeatmap.pdf"),
-#                    nrow = 1,
-#            width = 10, height= 4)
+## combine plots
+ggarrange(plotlist = list(metaNetwork_ggp, networkMetrics_ggp),
+          labels = paste0(letters[1:2], ")"),
+          label.x = 0, vjust =1.2, font.label = list(size = 13)
+)  %>%
+  ggpubr::ggexport(filename = here::here("figures/supplemental/metaNetwork_Graph_and_MetricHeatmap.pdf"),
+                   nrow = 1,
+           width = 10, height= 4)
 
 
 ```
@@ -1405,7 +1763,7 @@ qnm_ggp <- ggplot(qp_results_df,
     ]
   )+
   scale_y_continuous(expand = expansion(mult=0.15))+
-  labs(y="Effect on action (% sims)",x="Press perturbation")+
+  labs(y="Effect on action (% sims)",x="Positive press perturbation node")+
   theme_minimal(base_size = 10)+
   theme(
     legend.position = "bottom",
@@ -1539,7 +1897,7 @@ Key changes in policy/legislation, catalysed by the right socio-political enviro
 ## All mitigation OROs and international policy
 
 ```{r all components all mitigation OROs}
-allComponentDat_model_allMitOROs
+# allComponentDat_model_allMitOROs
 
 
 intPolMoments <- readxl::read_excel(
@@ -1566,7 +1924,7 @@ facetLabels <- c("Publications" = "Publications\nlog(N articles)",
                  "Legislation" = "Legislation\nlog(N documents)",
                  "Interest" = "Interest\nlog(N posts)",
                  "Support" = "Support\nlog(N positive posts + likes)",
-                 "Opposition" = "Opposition\nlog(N negative posts + likes)",
+                 # "Opposition" = "Opposition\nlog(N negative posts + likes)",
                  "International policy"="International policy moments"
                  )
 
@@ -1604,8 +1962,7 @@ ggp_tmp <- ggplot()+
   facet_wrap(vars(component),ncol=1, scales = "free_y")+
   labs(
     y="",
-    x="Year",
-    title = paste(oro_groups[[og]][o])
+    x="Year"
   )+
   theme_minimal(base_size = 10)+
   coord_cartesian(clip="off")+
@@ -1617,7 +1974,7 @@ ggp_tmp
 ```
 
 
-```{r broad-scale timeseries of all mitigation ORO publications and international policy moments}
+```{r remove - broad-scale timeseries of all mitigation ORO publications and international policy moments}
 
 ## Plot of international policy moments
 intPolMoments <- readxl::read_excel(
@@ -2097,7 +2454,7 @@ oro_groups <- list(
   "mCDR" = c("CDR-BioPump","CDR-BC","CDR-OAE"),
   "MRE" = c("MRE-Ocean","MRE-Located","MRE-Bio"),
   "Other"= c("CCS","Efficiency"),
-  "narrative" = c("MRE-Ocean", "CDR-OAE","Efficiency")
+  "narrative" = c("MRE-Located", "CDR-OAE","Efficiency")
 )
 
 
@@ -2110,15 +2467,6 @@ for(og in 1:length(oro_groups)){
   
   for(o in 1:length(oro_groups[[og]])){
     # get data
-    changePointsQuantiles <- cutpoint_results %>%
-      filter(oro_type == oro_groups[[og]][o], component %in% selectedComponents) %>%
-      pivot_wider(names_from = quantile, values_from = year)%>%
-      mutate(iqr = `97.5%`-`2.5%`)%>%
-      filter(iqr < 5) %>%
-      select(-iqr)%>%
-      pivot_longer(cols = `2.5%`:`97.5%`, names_to = "quantile", values_to = "year")
-    
-    
     tmpDat <- allComponentDat_model %>%
       filter(oro_type == oro_groups[[og]][o], !is.na(year), component %in% selectedComponents) %>%
       mutate(
@@ -2133,40 +2481,51 @@ for(og in 1:length(oro_groups)){
                      "Policy" = "Policy\nlog(N documents)",
                      "Legislation" = "Legislation\nlog(N documents)",
                      "Interest" = "Interest\nlog(N posts)",
-                     "Support" = "Support\nlog(N positive posts + likes)",
-                     "Opposition" = "Opposition\nlog(N negative posts + likes)"
+                     "Support" = "Support\nlog(N positive posts + likes)"
+                     # "Opposition" = "Opposition\nlog(N negative posts + likes)"
                      )
     
     tmpDat <- tmpDat %>%
       mutate(
+        component_color = factor(component, levels = componentAES$level, labels = componentAES$colour),
         component = factor(component, levels = componentAES$level, labels = componentAES$label)
       ) %>%
       mutate(
-        component = droplevels(component)
+        component = droplevels(component),
+        component_color = droplevels(component_color)
       )%>%
       mutate(
         component = plyr::revalue(component, facetLabels)
       )
     
-    changePointsQuantiles <- changePointsQuantiles %>%
+    # Get cutpoints
+    changePointsQuantiles <- cutpoint_results %>%
+      filter(oro_type == oro_groups[[og]][o], component %in% selectedComponents) %>%
+      pivot_wider(names_from = quantile, values_from = year)%>%
+      mutate(iqr = `97.5%`-`2.5%`)%>%
+      filter(iqr < 5) %>%
+      select(-iqr)%>%
+      pivot_longer(cols = `2.5%`:`97.5%`, names_to = "quantile", values_to = "year") %>%
       mutate(
         component = factor(component, levels = componentAES$level, labels = componentAES$label)
       ) %>%
       mutate(
         component = plyr::revalue(component, facetLabels)
-      )%>%
-      mutate(
-        component = droplevels(component)
       )
     
     
     ggp_tmp <- ggplot()+
-      geom_line(data = tmpDat, aes(x=year, y=y))+
-      # geom_vline(changePointsQuantiles, aes(xintercept))
-      geom_vline(data = changePointsQuantiles %>%filter(quantile %in% c("2.5%","97.5%")),
-               aes(xintercept=.data$year),
-               linewidth = 0.5, linetype = "dashed")+
+      
+      # geom_vline(data = changePointsQuantiles %>%filter(quantile %in% c("2.5%","97.5%")),
+      #          aes(xintercept=.data$year),
+      #          linewidth = 0.5, linetype = "dashed")+
+      geom_rect(data = changePointsQuantiles %>%filter(quantile %in% c("2.5%","97.5%")) %>% pivot_wider(names_from = "quantile", values_from = year),
+               aes(xmin=.data$`2.5%`, xmax=.data$`97.5%`),
+               ymin=-Inf, ymax=Inf,
+               fill="darkgrey", alpha=0.5)+
+      geom_line(data = tmpDat, aes(x=year, y=y, color=component_color))+
       scale_x_continuous(limits = year_lim)+
+      scale_color_identity(guide="none")+
       facet_wrap(vars(component),ncol=1, scales = "free_y")+
       labs(
         y="",
@@ -2192,11 +2551,77 @@ for(og in 1:length(oro_groups)){
          combined_patchwork, width = 3*length(ggps[[og]]), height = 7)
   }
 
-  
-  
+
   
 }
 
+
+## Plot with international policy moments as well
+intPolMoments <- readxl::read_excel(
+  here::here("data/raw-data/international_policy_moments.xlsx")
+)%>%
+  mutate(
+    year_min = as.numeric(year_min),
+    year_max = as.numeric(year_max),
+    component = "International policy"
+  )
+
+tmpYlims <- c(min(intPolMoments$year_min), max(intPolMoments$year_max)+2)
+
+ggp_intPolMom <- ggplot()+
+  geom_rect(data = intPolMoments,
+           aes(xmin=.data$year_min, xmax=.data$year_max),
+           ymin = -Inf, ymax=Inf,
+           fill="lightpink")+
+  geom_vline(data = intPolMoments,
+           aes(xintercept=.data$year_min),
+           linewidth = 0.5, linetype = "solid", col="red")+
+  geom_text(data = intPolMoments %>%
+              mutate(
+                y= rep(seq(0.1,0.7, length.out=3),ceiling(nrow(intPolMoments)/3))[1:nrow(intPolMoments)]
+              ),
+           aes(x=.data$year_min, y=.data$y, label= stringr::str_wrap(.data$label, width=10)),
+           angle=30, hjust=0, col="black", size=2, nudge_x = 0.2)+
+  scale_x_continuous(limits = tmpYlims)+
+  scale_y_continuous(limits = c(0,1))+
+  labs(
+    y="",
+    x="Year"
+  )+
+  theme_minimal(base_size = 10)+
+  coord_cartesian(clip="off")+
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.margin = unit(c(0.1, 0.1,0.1,0.1), units = "cm")
+  )
+
+ggp_intPolMom
+
+
+
+plotList <- lapply(ggps[[which(names(oro_groups)=="narrative")]],
+                   function(x){
+                     x+geom_vline(data = intPolMoments%>% select(year_min),
+                         aes(xintercept=.data$year_min),
+                         linewidth = 0.5, linetype = "solid", col="red")
+                   })
+plotList <- c(
+  list(ggp_intPolMom),
+  plotList
+)
+
+plotLayout <- "AAA
+              BCD"
+
+combined_patchwork <- wrap_plots(plotList, design = plotLayout, heights=c(0.2,1)) +
+    plot_annotation(tag_levels = 'a')
+
+ggsave(
+  here::here("figures/main/allComponents_narrative_intPolicy.pdf"),
+  width=8, height=8.5,
+  plot=combined_patchwork
+)
 ```
 
 
