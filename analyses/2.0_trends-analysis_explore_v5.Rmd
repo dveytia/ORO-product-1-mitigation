@@ -40,6 +40,8 @@ library(ggplot2)
 require(VLTimeCausality) # remotes::install_github("DarkEyes/VLTimeSeriesCausality")
 library(QPress) # remotes::install_github("SWotherspoon/QPress")
 library(reshape2)
+library(ggeffects)
+library(sjPlot)
 
 
 conflict_prefer("select", "dplyr")
@@ -267,16 +269,43 @@ oroTimeseries_ggp<- ggplot(allMit%>% filter(1980 <= year, year <= 2024), aes(x=y
 
 oroTimeseries_ggp
 # ggsave(
-#   here::here("figures/supplemental/nPublicationsTimeseriesPlots.pdf"),
+#   here::here("figures/main/nPublicationsTimeseriesPlots.pdf"),
 #   plot = oroTimeseries_ggp,
 #   width = 7, height=5
 # )
 
 ```
 
-```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("Distribution of N publications (predicted relevant by LLM classifier)", echo=FALSE}
+```{r combine publication timeseries with conceptual model figure and plot}
+library(magick)
+library(grid)
 
-knitr::include_graphics(here::here("figures/supplemental/nPublicationsTimeseriesPlots.pdf"))
+# Import slide of conceptual model
+slide_img <- image_read_pdf("figures/main/conceptual_model/conceptual_model.pdf", density = 600)
+slide_grob <- rasterGrob(as.raster(slide_img), interpolate = FALSE)
+
+
+
+## plot all together
+plotList <- list(oroTimeseries_ggp, 
+                 slide_grob
+                 )
+
+combined <- wrap_plots(plotList, nrow=2, heights=c(1,1))+
+  plot_annotation(tag_levels = "a")&theme(plot.tag.position = c(0, 1))
+
+
+ggsave(
+  here::here("figures/main/nPublicationsTimeseries_conceptualModel.pdf"),
+  plot = combined,
+  width = 7, height=9
+)
+
+```
+
+```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("Entrypoint - Distribution of N publications (predicted relevant by LLM classifier) and the conceptual model", echo=FALSE}
+
+knitr::include_graphics(here::here("figures/main/nPublicationsTimeseries_conceptualModel.pdf"))
 ```
 
 
@@ -452,6 +481,8 @@ oro_leg <- ggpubr::get_legend(dist_component_ggp)
 
 
 
+## Plot all together
+
 plotList <- list(
   dist_component_ggp+theme(plot.margin = unit(rep(0.1, 4),"cm")),
   year_component_ggp+
@@ -481,6 +512,7 @@ ggsave(
   width=6.5, height=7,
   plot = combined
 )
+
 
 ```
 
@@ -538,6 +570,38 @@ allDep_ggp
 
 # ggsave(here::here("figures/supplemental/mitigationDeploymentIndicators.pdf"), plot = allDep_ggp, width = 7, height=6)
 
+```
+
+```{r plot all dimension timeseries together}
+## Plot only timeseries
+
+plotList <- list(
+  year_component_ggp+
+    theme(legend.position = "none",
+          plot.margin = unit(rep(0.1, 4),"cm")
+          ),
+  year_component_prop_ggp+
+    theme(legend.position = "right",
+          plot.margin = unit(rep(0.1, 4),"cm")
+          ),
+  allDep_ggp +theme(plot.margin = unit(rep(0.1, 4),"cm"))
+)
+
+plotLay <-
+"ABC"
+
+combined <- wrap_plots(plotList,
+                       design = plotLay,
+                       widths = c(1,1,2.5)
+                       )+
+  plot_annotation(tag_levels = "a")
+
+
+ggsave(
+  here::here("figures/main/distribution_by_component_alltimeseries_plots.pdf"),
+  width=14, height=7,
+  plot = combined
+)
 ```
 
 ```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("ORO-specific action metrics"), echo=FALSE}
@@ -628,28 +692,6 @@ try_BCTransform <- function(series){
 }
 
 
-# # Define function to only use BC transform is HeteroSkedasticity present?
-# # Decided not to use and just use BC transformation
-# correctHeteroskedasticity <- function(series, years){
-#   lmMod <- lm(series~years)
-#   isHet <- lmtest::bptest(lmMod)
-#   if(isHet$p.value <= 0.05){
-#     series_trans <- BCTransform(series)
-#     return(series_trans)
-#   }else{
-#     return(series)
-#   }
-# }
-# try_correctHeteroskedasticity <- function(series, years){
-#   tryCatch(
-#     {correctHeteroskedasticity(series, years)},
-#     error = function(e){
-#       return(series)
-#     }
-#   )
-# }
-
-
 
 ## Loop 1 -- loop through OROs
 TE_results <- data.frame()
@@ -664,6 +706,7 @@ for(oro in oros){
     filter(oro_type == oro) %>%
     complete(component, year=year_lim[1]:year_lim[2], 
              fill = list(y=0), explicit= FALSE) %>%
+    arrange(component, year)%>%
     group_by(component) %>%
     mutate(y_trans = try_BCTransform(y)) %>%
     ungroup()
@@ -678,16 +721,34 @@ for(oro in oros){
     TE_pval = rep(NA, nrow(edges)),
     TE_ratio = rep(NA, nrow(edges)),
     optDelay = rep(NA, nrow(edges)),
-    optCor = rep(NA, nrow(edges))
+    optCor = rep(NA, nrow(edges)),
+    dtw=rep(NA, nrow(edges))
   )
   
   # Loop through the edges and test for causality
   for(e in 1:nrow(edges)){
+    
+    X = oroDat$y_trans[oroDat$component == edges[e,1]]
+    Y = oroDat$y_trans[oroDat$component == edges[e,2]]
+    if(length(X) != length(Y)){next}
+    
+    # remove leading or trailing zeros
+    edge_dat <- data.frame(
+      X = X,
+      Y = Y
+    )
+    # trim leading and trailing zeros
+    first_nonzero <- min(which(rowSums(edge_dat != 0) ==ncol(edge_dat)))
+    last_nonzero  <- max(which(rowSums(edge_dat != 0) ==ncol(edge_dat)))
+    edge_dat <- edge_dat[first_nonzero:last_nonzero, ]
+    
+    if(nrow(edge_dat) == 0){next}
+    
 
     TE_out <- tryCatch(
       {VLTransferEntropy(
-      Y= oroDat$y_trans[oroDat$component == edges[e,1]],
-      X= oroDat$y_trans[oroDat$component == edges[e,2]],
+      X= edge_dat$X,
+      Y= edge_dat$Y,
       maxLag = 5,
       VLflag=TRUE,nboot=100, alpha = 0.05)},
       error = function(e){
@@ -701,6 +762,7 @@ for(oro in oros){
       edgesResults$TE_ratio[e] <- NA
       edgesResults$optDelay[e] <- NA
       edgesResults$optCor[e] <- NA
+      edgesResults$dtw[e] <- NA
     }else{
       
       ## Save outputs into data frame
@@ -711,6 +773,8 @@ for(oro in oros){
       edgesResults$TE_ratio[e] <- TE_out$TEratio
       # optimal time delay inferred by cross-correlation of X,Y. It is positive if Y is simply just a time-shift of X (e.g. Y[t]=X[t-optDelay]).
       edgesResults$optDelay[e] <- TE_out$follOut$optDelay 
+      # time series of optimal warping-path from DTW that is corrected by cross correlation. It is approximately that Y[t]=X[t-optIndexVec[t]])
+      edgesResults$dtw[e] <- mean(TE_out$follOut$optIndexVec[,1], na.rm=T)
       # optimal correlation of Y[t]=X[t-optDelay] for all t
       # Maybe if optCor is negative, that can give me the sign 
       edgesResults$optCor[e] <- TE_out$follOut$optCor
@@ -748,17 +812,12 @@ for(oro in oros){
 }
 
 # clean
-rm(oroDat, nodes, edges, TE_out, edgesResults)
+# rm(oroDat, nodes, edges, TE_out, edgesResults)
 
 
 
-## Check data
-# View(TE_results)
-# View(TE_results_summary)
-# TE_results %>% filter(!is.na(TE_XCauseY)) %>%filter(TE_XCauseY == TRUE)  %>% View
 
-
-# save(TE_results, TE_results_summary, file = here::here("data/derived-data/TE_results.RData"))
+save(TE_results, TE_results_summary, file = here::here("data/derived-data/TE_results.RData"))
 ```
 
 
@@ -769,6 +828,133 @@ load(here::here("data/derived-data/TE_results.RData")) # TE_results, TE_results_
 
 ```
 
+
+```{r plot of VLTE time series transform for method figure}
+oro = "Efficiency" #"MRE-Located"
+varx= "policy" # publications
+vary = "deployment"
+
+oroDat <- allComponentDat_model %>%
+    filter(oro_type == oro) %>%
+    complete(component, year=year_lim[1]:year_lim[2], 
+             fill = list(y=0), explicit= FALSE) %>%
+    group_by(component) %>%
+    arrange(component, year)%>%
+    mutate(y_trans = try_BCTransform(y)) %>%
+    ungroup()
+
+year = oroDat$year[oroDat$component == varx]
+X = oroDat$y_trans[oroDat$component == varx] # cause
+Y = oroDat$y_trans[oroDat$component == vary] # effect
+
+
+
+# remove leading or trailing zeros
+edge_dat <- data.frame(
+  X = X,
+  Y = Y,
+  year=year
+)
+# trim leading and trailing zeros
+
+
+first_nonzero <- min(which(rowSums(edge_dat != 0) ==ncol(edge_dat)))
+last_nonzero  <- max(which(rowSums(edge_dat != 0) ==ncol(edge_dat)))
+edge_dat <- edge_dat[first_nonzero:last_nonzero, ]
+
+
+# year = oroDat$year[oroDat$component == "publications"][1:24]
+# X = oroDat$y_trans[oroDat$component == "publications"][1:24] # cause
+# Y = oroDat$y_trans[oroDat$component == "deployment"][1:24] # effect
+
+plot(edge_dat$Y)
+plot(edge_dat$X)
+  
+TE_out <- tryCatch(
+  {VLTransferEntropy(
+  Y = edge_dat$Y, 
+  X = edge_dat$X, 
+  maxLag = 5,
+  VLflag=TRUE,nboot=100, alpha = 0.05)},
+  error = function(e){
+    return(NULL)
+  }
+)
+
+TE_out
+
+vlte_df <- rbind(
+  data.frame(
+    series = paste("X"),
+    x = edge_dat$year,
+    y=edge_dat$X,
+    dtw_lag = NA
+  ),
+  data.frame(
+    series = paste("Y"),
+    x = edge_dat$year,
+    y = edge_dat$Y,
+    dtw_lag = NA
+  ),
+  data.frame(
+    series = paste("X (modified lag to match Y)"),
+    x = edge_dat$year,
+    y = edge_dat$X[1:length(edge_dat$X)-TE_out$follOut$optIndexVec[,1]],
+    dtw_lag = -TE_out$follOut$optIndexVec[,1]
+  )
+) %>%
+  mutate(
+    series = factor(series,
+                    levels=c(
+                      "X","Y","X (modified lag to match Y)"
+                    )
+                    # labels = c(
+                    #   "X (Policy)",
+                    #   "Y (Action)",
+                    #   "X (modified lag to match Y)"
+                    # )
+                    )
+  )%>%
+  arrange(series, y)
+
+vlte_ggp <- ggplot(data=vlte_df, aes(x=x, y=y, color = series))+
+  geom_line()+
+  geom_text(aes(label = dtw_lag), vjust=0)+
+  # scale_color_brewer(type="qual", palette = "Dark2")+
+  scale_color_manual(
+    values = componentAES$colour[
+      c(
+        which(componentAES$level == varx),
+        which(componentAES$level == vary),
+        which(componentAES$level == varx)
+      )
+    ]
+  )+
+  facet_wrap(vars(series),ncol=1, scales = "free_y")+
+  labs(
+    x="Year", y="Value"
+  )+
+  theme_minimal(base_size=10)+
+  theme(
+    legend.position = "none"
+  )
+
+vlte_ggp
+
+  
+ggsave(
+  here::here("figures/supplemental/VLTE_demonstration_plot.pdf"),
+  width = 4, height=3,
+  plot = vlte_ggp
+)
+
+ggsave(
+  here::here("figures/supplemental/VLTE_demonstration_plot.png"),
+  width = 4, height=3,
+  dpi=600,
+  plot = vlte_ggp
+)
+```
 
 
 ## Step 2.1: Create Network by ORO group from TE edges
@@ -837,6 +1023,7 @@ for (k in 1:n_clusters) {
            !is.na(TE_ratio),
            0 < TE_ratio
            )
+  cluster_te$TE_ratio[cluster_te$TE_ratio==Inf] <- max(cluster_te$TE_ratio[is.finite(cluster_te$TE_ratio)])
   
   # Aggregate TE_ratio per NodeX → NodeY pair
   edge_summary <- cluster_te %>%
@@ -971,7 +1158,8 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, dot_offset=0.05) {
       data = dot_positions,
       aes(x = dot_x, y = dot_y, size = 2*log1p(weight)),
       shape = 21,             
-      fill = "#d01c8b"
+      fill = "#d01c8b",
+      color="transparent"
     ) +
     scale_size_identity()+
     
@@ -989,7 +1177,7 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, dot_offset=0.05) {
                    size = nodeTextSize, alpha=0.8
                    ) +
 
-    labs(title = paste(cluster_label)) +
+    labs(title = paste(cluster_label), tag = letters[cluster_id]) +
     theme_void() +
     theme(
       plot.title = element_text(size = titleSize, hjust = 0.5),
@@ -998,28 +1186,37 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, dot_offset=0.05) {
 }
 
 cluster_order <- 1:n_clusters
+concept_cluster_names2 <- list(
+  "CCS","mCDR","Efficiency","MRE"
+)
 concept_ggraph_plots <- lapply(cluster_order, function(k) {
-  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names[[k]], dot_offset = 0.1)
+  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], dot_offset = 0.05)
 })
 
 
 
-
-require(patchwork)
-
 # Arrange the ggraph plots horizontally according to cluster number
 final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2))
-final_plot
 
-# # Show or save
-# ggsave(filename=here::here("figures/supplemental/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
+
+# Show or save
+ggsave(filename=here::here("figures/main/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
+
+```
+
+```{r plot just efficiency network for method figure}
+ggsave(
+  here::here("figures/supplemental/networks_efficiency.png"),
+  width = 4, height=4, dpi=600,
+  plot = concept_ggraph_plots[[which(concept_cluster_names2 == "Efficiency")]]
+)
 
 ```
 
 Negatvive Leg -> support -> action could actually be a direct effect of Leg -> action?
 
 
-```{r for mCDR and MRE calculate node importance and influence}
+```{r for mCDR and MRE and Efficiency calculate node importance and influence}
 plot_network_metrics <- function(network_graph){
   # causal influencers - legislation, policy
   influencers <- degree(network_graph, mode = "out") %>% 
@@ -1104,21 +1301,214 @@ plot_network_metrics <- function(network_graph){
 }
 
 
-concept_metrics_heatmaps <- lapply(c(2,4), function(k) {
+concept_metrics_heatmaps <- lapply(c(2,3,4), function(k) {
   plot_network_metrics(concept_meta_graphs[[k]])
 })
 
 
 ```
 
+```{r for mCDR and MRE and Efficiency compute QNM, eval=FALSE}
 
-```{r plot networks and network metrics for mCDR and MRE OROs}
+source(here::here("R/impact.barplot.myMod"))
+source(here::here("R/extend.vector"))
+source(here::here("R/my.QPress.R"))
+addTaskCallback(function(...) {set.seed(123);TRUE})
 
+# Function to run press perturbation with timeout if it freezes
+safe_impact_barplot <- function(ModSim, press, timeout = 30) {
+  tryCatch(
+    withTimeout(
+      {
+        impact.barplot.myMod(ModSim,
+            perturb = press,
+            plot=FALSE, percentage = TRUE
+        )
+      },
+      timeout = timeout,
+      onTimeout = "silent"   # do not throw error on timeout
+    ),
+    error = function(e) NULL,
+    TimeoutException = function(e) NULL
+  )
+}
+
+plot_QNM <- function(k, nSims = 5000, weightSimulation = FALSE, uncertainThreshold=0.5){
+  
+  # Get oro_types in this cluster
+  oroTypes <- concept_cluster_df %>%
+    filter(cluster == k) %>%
+    pull(oro_type)
+
+  ## 1. Pool the transfer entropy results
+  sig_te_edges <- TE_results %>%
+    filter(oro_type %in% oroTypes,
+           NodeX %in% selectedComponents,
+             NodeY %in% selectedComponents,
+             TE_pval <= 0.05,
+             !is.na(TE_ratio),
+             0 < TE_ratio
+             ) %>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      n_sig = n(),
+      avg_ratio = mean(TE_ratio, na.rm = TRUE),
+      avg_correlation = mean(optCor, na.rm=T),
+      med_correlation = quantile(optCor, na.rm=T, probs = 0.5),
+      avg_delay = mean(optDelay, na.rm=T),
+      sign = ifelse(avg_correlation >= 0, 1, -1),
+      oro_types = paste(unique(oro_type), collapse = ", "), 
+      .groups = 'drop'
+    )%>%
+    mutate(
+      Probability = n_sig / max(n_sig),
+      Group = ifelse(uncertainThreshold < Probability,0,1),
+      Type = ifelse(sign==1,"P","N")
+    ) %>%
+    arrange(desc(Probability)) %>%
+    select(From=NodeX, To=NodeY, Group, Probability, Type)
+  
+
+  
+  
+  
+  # Format the data frame for Q Press
+  sig_nodes <- as.character(unique(c(sig_te_edges$From, sig_te_edges$To)))
+  
+  sig_te_edges <- sig_te_edges %>%
+    mutate(
+      From = factor(From, levels = sig_nodes),
+      To = factor(To, levels=sig_nodes),
+      Type = factor(Type, levels = c("N","P","U","Z")),
+      # Group = factor(Group)
+    ) %>%
+    ungroup() %>%
+    ## add Pair
+    mutate(
+      # Convert From and To to character to avoid issues with factors
+      From_char = as.character(From),
+      To_char = as.character(To),
+      # Sort From and To alphabetically
+      PairKey = pmin(From_char, To_char),
+      PairKey = paste(PairKey, pmax(From_char, To_char), sep = "-")
+    ) %>%
+    mutate(Pair = as.integer(factor(PairKey)))
+  
+  
+  
+  
+  allEdgesLabels <- edge.labels(sig_te_edges) 
+  
+  Mod <- enforce.limitation(sig_te_edges%>% select(From, To, Group, Type, Pair)) 
+  
+  
+  ## 2. Build Qualitative network model
+  # Optional: Simulate with weights?
+  if(weightSimulation){
+    s <- community.sampler(Mod)
+    s$select(mean(uncertainSampleProbsDf$Probability))
+    ModSim <- tryCatch(
+      {system.simulate(nSims, Mod, s)},
+      error = function(e){NULL}
+    )
+   
+  }else{
+    ModSim <- tryCatch(
+      {system.simulate(nSims, Mod)},
+      error = function(e){NULL}
+    )
+  }
+  
+  ## If Mod sim Null, return nothing, else calculate presses
+  if(is.null(ModSim)){
+    return(NULL)
+  }else{
+    
+    ## 3. For each node (except action), simulate a press perturbation and record the response of action.
+  
+    # Loop over interventions on each node → observe effect on "deployment"
+    all_nodes <- sig_nodes[sig_nodes != "deployment"]
+    qp_results_df <- data.frame()
+    for (node in all_nodes) {
+      press <- c(1)
+      names(press) <- node
+    
+      # Set evidence and query deployment
+      temp <- safe_impact_barplot(ModSim, press, timeout = 30)
+      if(is.null(temp)){
+        return(tibble(Negative=NA, `No Change`=NA, Positive=NA, Press_perturb=node))
+      }else{
+        temp <- as.data.frame(t(temp["deployment",]))
+        temp$Press_perturb <- node
+      }
+      
+      qp_results_df <- qp_results_df %>% bind_rows(temp)
+      
+    } # end of calculating presses
+    
+    
+
+    # Plot results
+    uniquePP <- unique(qp_results_df$Press_perturb)
+    
+    qnm_ggp <- ggplot(qp_results_df, 
+           aes(x=Press_perturb))+
+      geom_col(aes(y=Positive), fill="#4dac26")+ 
+      geom_col(aes(y=-Negative), fill = "#d01c8b")+
+      
+      geom_text(aes(y=Positive, label = Positive), vjust=0)+
+      geom_text(aes(y=-Negative, label = Negative), vjust=1)+
+      
+      geom_hline(yintercept=0, col="red")+
+      # scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=5, colours = viridis(5))+
+      scale_x_discrete(
+        breaks = componentAES$level[
+          componentAES$level %in% uniquePP
+        ],
+        labels = componentAES$label[
+          componentAES$level %in% uniquePP
+        ]
+      )+
+      scale_y_continuous(expand = expansion(mult=0.15))+
+      labs(y="Effect on action (% sims)",x="Positive press perturbation node")+
+      theme_minimal(base_size = 10)+
+      theme(
+        legend.position = "bottom",
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x=element_text(angle=45, hjust=1)
+      )
+    
+    return(qnm_ggp)
+    
+  } # end of !is.null(ModSim)
+  
+    
+}
+
+
+concept_qnm_barplots <- lapply(c(2,3,4), function(k){
+  plot_QNM(k=k)
+})
+
+```
+
+
+
+```{r plot networks and network metrics heatmaps and qnm results for conceptual clusters}
+## Just networks and network metrics
 plotList <- c(
-  concept_ggraph_plots[[2]],
-  concept_metrics_heatmaps[[1]],
+  # MRE
   concept_ggraph_plots[[4]],
-  concept_metrics_heatmaps[[2]]
+  concept_metrics_heatmaps[[3]],
+  
+  # Efficiency
+  concept_ggraph_plots[[3]],
+  concept_metrics_heatmaps[[2]],
+  
+  # mcdr
+  concept_ggraph_plots[[2]],
+  concept_metrics_heatmaps[[1]]
 )
 
 combined <- wrap_plots(plotList, ncol=2, axes = "collect_x", 
@@ -1126,8 +1516,39 @@ combined <- wrap_plots(plotList, ncol=2, axes = "collect_x",
   plot_annotation(tag_levels = "a")
 
 ggsave(
-  here::here("figures/supplemental/networks_mCDR_MRE.pdf"),
-  width=9, height=8, 
+  here::here("figures/main/conceptual_networks_heatmaps.pdf"),
+  width=9, height=10, 
+  plot=combined
+)
+
+
+
+## Include networks and network metrics AND QNM results
+plotList <- c(
+  # MRE
+  concept_ggraph_plots[[4]],
+  concept_metrics_heatmaps[[3]],
+  concept_qnm_barplots[[3]],
+  
+  # Efficiency
+  concept_ggraph_plots[[3]],
+  concept_metrics_heatmaps[[2]],
+  concept_qnm_barplots[[2]],
+  
+  # mCDR
+  concept_ggraph_plots[[2]],
+  concept_metrics_heatmaps[[1]],
+  concept_qnm_barplots[[1]]
+  
+)
+
+combined <- wrap_plots(plotList, ncol=3,
+                       guides="collect", widths = c(1.7, 1,1))+
+  plot_annotation(tag_levels = "a")
+
+ggsave(
+  here::here("figures/main/conceptual_networks_heatmaps_qnm.pdf"),
+  width=12, height=12, 
   plot=combined
 )
 
@@ -1135,7 +1556,7 @@ ggsave(
 
 ```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("Networks and associated metrics grouped by type of ORO", echo=FALSE}
 
-knitr::include_graphics(here::here("figures/supplemental/networks_mCDR_MRE.pdf"))
+knitr::include_graphics(here::here("figures/main/conceptual_networks_heatmaps_qnm.pdf"))
 ```
 
 
@@ -1165,6 +1586,9 @@ meta_links <- TE_results %>%
   ) %>%
   arrange(desc(relative_nsig), desc(avg_ratio)) 
 
+meta_links$avg_ratio[meta_links$avg_ratio==Inf] <- max(
+  meta_links$avg_ratio[is.finite(meta_links$avg_ratio)]
+)
 
 # Make meta graph
 meta_graph <- graph_from_data_frame(meta_links, directed = TRUE)
@@ -1646,7 +2070,7 @@ NB: Because compares OROs between each other, cannot include deployment because 
 
 
 ```{r fit glm of proportional share of component ~ proportional share of publication + year, eval = FALSE}
-library(ggeffects)
+
 
 # “For each ORO, how many public-interest posts do you get per publication?”
 # EG the probability of getting a post per publication.
@@ -1884,7 +2308,110 @@ ggsave(
   width = 10,
   height = 6.5
 )
+
 ```
+
+```{r combine regression plots with plots of distribution by ORO type}
+
+## Get data and plot distribution by oro for the different dimensions 
+
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+nPubs_oro <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+  group_by(level)%>%
+  summarise(
+    N = n_distinct(analysis_id[0.5 <= (mean_prediction)])
+  )%>%
+  collect()%>%
+  mutate(
+    oro_type = gsub("[.]","-",level),
+    component = "publications",
+    variable_name = "Publications (N)"
+  ) %>%
+  select(oro_type, component, variable_name, N)
+
+dbDisconnect(p1_db)
+
+
+
+## Sumarise by component overall proportional shar of each ORO
+prop_oro_summary_df <- allComponentDat_model %>%
+  filter(!(component %in% c("deployment","publications"))) %>%
+  group_by(component, variable_name, oro_type) %>%
+  summarise(
+    N = sum(y, na.rm=T)
+  ) %>%
+  bind_rows(
+    nPubs_oro
+  ) %>%
+  group_by(component) %>%
+  mutate(
+    total_component = sum(N, na.rm=T)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    prop_component = N/total_component,
+    component = factor(component, 
+                       levels = componentAES$level, 
+                       labels = componentAES$label_varname)
+  )%>%
+  mutate(
+    component = droplevels(component)
+  )
+  
+prop_oro_summary_df
+
+
+# Plot proportion of each dimension per ORO
+dist_component_ggp_bottom <- ggplot(data = prop_oro_summary_df, aes(x=component))+
+  geom_col(aes(y=prop_component, fill=oro_type), position="stack")+
+  geom_text(aes(label = scales::number(total_component, accuracy = 1, big.mark = ",")), check_overlap = TRUE, vjust=0, y=1)+
+  scale_fill_manual(
+    breaks = typeAES$level,
+    values = typeAES$colour
+  )+
+  scale_y_continuous(expand = expansion(mult=c(0,0.1)))+
+  labs(
+    x="Dimension (i.e. Node)",
+    y="Proportion",
+    fill="ORO type",
+    tag = "a"
+  )+
+  guides(fill=guide_legend(ncol=2))+
+  theme_minimal(base_size = 10)+
+  theme(
+    axis.text.x = element_text(angle=45, hjust=1),
+    legend.position = "bottom",
+    legend.title.position = "top"
+  )
+
+dist_component_ggp_bottom
+
+
+## Combine plots
+ggps_prop_leg <- lapply(ggps_prop, function(x) x+theme(legend.position="right"))
+
+combined <- wrap_plots(ggps_prop_leg, guides = "collect")
+
+
+plotLayout<-"AB
+#B"
+
+combined2 <- dist_component_ggp_bottom + combined + plot_annotation(tag_levels = "a")+plot_layout(widths = c(1.2,3), heights=c(1,0.2), design = plotLayout)
+
+
+ggsave(
+  filename = here::here("figures/main/GlmFitPlots_proportion_andBarplots.pdf"),
+  plot = combined2,
+  width = 12,
+  height = 7
+)
+
+```
+
+
 
 
 
@@ -2359,6 +2886,15 @@ for(og in 1:length(oro_groups)){
   
 }
 
+## Plot just efficiency for method figure
+eff_allComponents <- ggps[[which(names(oro_groups)=="Other")]][which(oro_groups$Other == "Efficiency")]
+
+ggsave(
+  here::here("figures/supplemental/allComponents_efficiency.png"),
+  width=3.5, height=6, dpi = 600,
+  plot = eff_allComponents
+)
+
 
 ## Plot with international policy moments as well
 intPolMoments <- readxl::read_excel(
@@ -2426,6 +2962,7 @@ ggsave(
   width=8, height=8.5,
   plot=combined_patchwork
 )
+
 ```
 
 
@@ -3107,7 +3644,7 @@ p_all <- wrap_plots(plotList, ncol = 2, widths = c(1,1)) +
 
 # Save
 ggsave(
-  here::here("figures/main/allChangePointPlots.pdf"),
+  here::here("figures/supplemental/allChangePointPlots.pdf"),
   p_all,
   width = 10, height = 12
 )
@@ -3116,7 +3653,7 @@ ggsave(
 
 ```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("Qualitative analysis of change points"), echo=FALSE}
 
-knitr::include_graphics(here::here("figures/main/allChangePointPlots.pdf"))
+knitr::include_graphics(here::here("figures/supplemental/allChangePointPlots.pdf"))
 ```
 
 
