@@ -39,6 +39,7 @@ outputs/sentiment_predictions/
 
 # RStudio files
 .Rproj.user/
+ORO-product-1-mitigation.Rproj
 
 # produced vignettes
 vignettes/*.html
