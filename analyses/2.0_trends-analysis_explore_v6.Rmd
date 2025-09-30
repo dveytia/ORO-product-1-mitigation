@@ -1455,34 +1455,7 @@ load(here::here("data/derived-data/concept_qnm_barplots.RData"))
 ```
 
 ```{r plot networks and network metrics heatmaps and qnm results for conceptual clusters}
-## Just networks and network metrics
-plotList <- c(
-  # MRE
-  concept_ggraph_plots[[4]],
-  concept_metrics_heatmaps[[3]],
-  
-  # Efficiency
-  concept_ggraph_plots[[3]],
-  concept_metrics_heatmaps[[2]],
-  
-  # mcdr
-  concept_ggraph_plots[[2]],
-  concept_metrics_heatmaps[[1]]
-)
 
-combined <- wrap_plots(plotList, ncol=2, axes = "collect_x", 
-                       guides="collect", widths = c(2, 1))+
-  plot_annotation(tag_levels = "a")
-
-ggsave(
-  here::here("figures/main/conceptual_networks_heatmaps.pdf"),
-  width=9, height=10, 
-  plot=combined
-)
-
-
-
-## Include networks and network metrics AND QNM results
 concept_ggraph_plots2 <- lapply(cluster_order, function(k) {
   plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], end_cap_mm = 10, end_cap_mult_factor=2.5)
 })
@@ -1637,6 +1610,7 @@ for(c in 1:length(components)){
     mutate(
       Term = gsub("prop_pub","Proportion of publications", gsub("year", "Year", Term))
     )
+  
 
   modelResultsProp[[c]] <- modSummary
 
@@ -1730,7 +1704,7 @@ for(c in 1:length(components)){
 
 modelResultsPropTable <- do.call("bind_rows", modelResultsProp)
 
-
+modelResultsPropTable[,3:6] <- apply(modelResultsPropTable[,3:6],1:2, function(x) format(as.numeric(x),digits = 2, scientific=TRUE))
 
 
 
@@ -1739,7 +1713,7 @@ modelResultsPropTable <- do.call("bind_rows", modelResultsProp)
 ## save
 
 write.csv(
-  modelResultsPropTable,
+  modelResultsPropTable,row.names = FALSE,
   here::here("outputs/publications_otherDim_glmResults_proportion.csv")
 )
 
