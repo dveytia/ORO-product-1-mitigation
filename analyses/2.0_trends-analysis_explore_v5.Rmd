@@ -1574,7 +1574,7 @@ knitr::include_graphics(here::here("figures/main/conceptual_networks_heatmaps_qn
 ```
 
 
-## Step 2.2: Create Network for ALL OROs from TE edges + QNM
+## Step 2.2: Create Network for ALL OROs from TE edges + QNM -- remove
 
 ```{r Aggregate Causal Strengths Across all oros - create meta network, eval = FALSE}
 meta_links <- TE_results %>%

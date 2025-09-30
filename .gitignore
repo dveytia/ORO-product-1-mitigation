@@ -11,7 +11,7 @@ data/derived-data/screen-article-answers-formatted/
 outputs/coded-label-predictions/*.csv
 outputs/coded-label-predictions/ORO_sys_map_update/*
 outputs/coded-label-predictions/oro_type_v1_predictions.csv
-outputs/model_scores/
+#outputs/model_scores/
 outputs/sentiment_predictions/
 
 # key information
