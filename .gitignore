@@ -1,5 +1,7 @@
 
 ## project specific files
+*.tar.gz
+python/python_data*.tar.gz
 /data/raw-data/predictedRelevant*Altmetrics*
 /data/raw-data/external/IEA-Energy-End-uses-and-Efficiency-Indicators-database-Highlights-November-2023.xlsx
 data/sqlite-databases/product1.sqlite

@@ -1,0 +1,36 @@
+=======================TASK PROLOG================================
+Job 7524256 submitted on cluster spiritx from spiritx1.ipsl.fr
+Job 7524256 submitted by dveytia with account lmd
+Job 7524256 is running with 1 nodes and 39 cores on spiritx96-4
+Job 7524256 memory requirements are 153600 MB per node
+Job 7524256 starting at 2025/07/03 14:59:53
+==================================================================
+#!/bin/ksh -vx
+#SBATCH --verbose
+#SBATCH --output="%x.out_%j"
+#SBATCH --nodes=1
+#SBATCH --ntasks=15
+#SBATCH --mem=150GB
+#SBATCH --time=72:00:00
+### on rentre dans le repertoire de run
+
+
+cd /home/dveytia/IPython_Notebooks/Product_1/analyses/09_multilabel_ecosystem
+
++ cd /home/dveytia/IPython_Notebooks/Product_1/analyses/09_multilabel_ecosystem
+mpiexec -n 3 python 09_multilabel_ecosystem_selection.py+ mpiexec -n 3 python 09_multilabel_ecosystem_selection.py
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+2025-07-03 14:59:59.772741: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-07-03 14:59:59.772719: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-07-03 14:59:59.772720: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-07-03 15:00:01.616873: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+2025-07-03 15:00:01.617015: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+2025-07-03 15:00:01.617171: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT

@@ -1,0 +1,40 @@
+=======================TASK PROLOG================================
+Job 7498312 submitted on cluster spiritx from spiritx1.ipsl.fr
+Job 7498312 submitted by dveytia with account lmd
+Job 7498312 is running with 1 nodes and 39 cores on spiritx64-8
+Job 7498312 memory requirements are 153600 MB per node
+Job 7498312 starting at 2025/06/26 12:01:56
+==================================================================
+#!/bin/ksh -vx
+#SBATCH --verbose
+#SBATCH --output="%x.out_%j"
+#SBATCH --nodes=1
+#SBATCH --ntasks=15
+#SBATCH --mem=150GB
+#SBATCH --time=72:00:00
+### on rentre dans le repertoire de run
+
+
+cd /home/dveytia/IPython_Notebooks/Product_1/analyses/08_binary_codis_benefit
+
++ cd /home/dveytia/IPython_Notebooks/Product_1/analyses/08_binary_codis_benefit
+/var/spool/slurm/d/job7498312/slurm_script[11]: cd: /home/dveytia/IPython_Notebooks/Product_1/analyses/08_binary_codis_benefit: [No such file or directory]
+mpiexec -n 3 python 08_binary_codis_benefit_selection.py+ mpiexec -n 3 python 08_binary_codis_benefit_selection.py
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+2025-06-26 12:02:00.094676: I tensorflow/core/util/port.cc:110] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-06-26 12:02:00.094673: I tensorflow/core/util/port.cc:110] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-06-26 12:02:00.094693: I tensorflow/core/util/port.cc:110] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-06-26 12:02:00.340391: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-26 12:02:00.340403: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-26 12:02:00.340439: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-26 12:02:01.507443: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+2025-06-26 12:02:01.507341: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+2025-06-26 12:02:01.507466: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT

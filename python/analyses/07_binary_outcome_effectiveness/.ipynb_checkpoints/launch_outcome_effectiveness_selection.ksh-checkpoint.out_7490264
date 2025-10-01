@@ -1,0 +1,45 @@
+=======================TASK PROLOG================================
+Job 7490264 submitted on cluster spiritx from spiritx1.ipsl.fr
+Job 7490264 submitted by dveytia with account lmd
+Job 7490264 is running with 1 nodes and 39 cores on spiritx64-9
+Job 7490264 memory requirements are 153600 MB per node
+Job 7490264 starting at 2025/06/24 10:52:01
+==================================================================
+#!/bin/ksh -vx
+#SBATCH --verbose
+#SBATCH --output="%x.out_%j"
+#SBATCH --nodes=1
+#SBATCH --ntasks=15
+#SBATCH --mem=150GB
+#SBATCH --time=72:00:00
+### on rentre dans le repertoire de run
+
+
+cd /home/dveytia/IPython_Notebooks/Product_1/analyses/07_binary_outcome_effectiveness
+
++ cd /home/dveytia/IPython_Notebooks/Product_1/analyses/07_binary_outcome_effectiveness
+mpiexec -n 3 python 07_binary_outcome_effectiveness_selection.py+ mpiexec -n 3 python 07_binary_outcome_effectiveness_selection.py
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+2025-06-24 10:52:04.727804: I tensorflow/core/util/port.cc:110] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-06-24 10:52:04.727820: I tensorflow/core/util/port.cc:110] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-06-24 10:52:04.727819: I tensorflow/core/util/port.cc:110] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-06-24 10:52:05.095898: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-24 10:52:05.095904: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-24 10:52:05.095917: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-24 10:52:06.510626: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+2025-06-24 10:52:06.510617: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+2025-06-24 10:52:06.510615: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+The data has been re-formatted
+(1185, 33)
+The data has been re-formatted
+(1185, 33)
+The data has been re-formatted
+(1185, 33)

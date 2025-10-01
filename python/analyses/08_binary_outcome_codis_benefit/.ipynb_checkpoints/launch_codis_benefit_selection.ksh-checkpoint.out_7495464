@@ -1,0 +1,144 @@
+=======================TASK PROLOG================================
+Job 7495464 submitted on cluster spiritx from spiritx1.ipsl.fr
+Job 7495464 submitted by dveytia with account lmd
+Job 7495464 is running with 1 nodes and 39 cores on spiritx64-5
+Job 7495464 memory requirements are 153600 MB per node
+Job 7495464 starting at 2025/06/25 17:40:00
+==================================================================
+#!/bin/ksh -vx
+#SBATCH --verbose
+#SBATCH --output="%x.out_%j"
+#SBATCH --nodes=1
+#SBATCH --ntasks=15
+#SBATCH --mem=150GB
+#SBATCH --time=72:00:00
+### on rentre dans le repertoire de run
+
+
+cd /home/dveytia/IPython_Notebooks/Product_1/analyses/08_binary_codis_benefit
+
++ cd /home/dveytia/IPython_Notebooks/Product_1/analyses/08_binary_codis_benefit
+/var/spool/slurm/d/job7495464/slurm_script[11]: cd: /home/dveytia/IPython_Notebooks/Product_1/analyses/08_binary_codis_benefit: [No such file or directory]
+mpiexec -n 3 python 08_binary_codis_benefit_selection.py+ mpiexec -n 3 python 08_binary_codis_benefit_selection.py
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+3.8.18 (default, Sep 11 2023, 13:20:55) 
+[GCC 11.2.0]
+2025-06-25 17:40:05.445189: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-25 17:40:05.445211: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-25 17:40:05.445176: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-06-25 17:40:07.359577: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+2025-06-25 17:40:07.359687: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+2025-06-25 17:40:07.359834: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+The data has been re-formatted
+(1185, 33)
+The data has been re-formatted
+(1185, 33)
+The data has been re-formatted
+(1185, 33)
+/home/dveytia/.local/lib/python3.8/site-packages/tensorflow_addons/utils/tfa_eol_msg.py:23: UserWarning: 
+
+TensorFlow Addons (TFA) has ended development and introduction of new features.
+TFA has entered a minimal maintenance and release mode until a planned end of life in May 2024.
+Please modify downstream libraries to take dependencies from other repositories in our TensorFlow community (e.g. Keras, Keras-CV, and Keras-NLP). 
+
+For more information see: https://github.com/tensorflow/addons/issues/2807 
+
+  warnings.warn(
+/home/dveytia/.local/lib/python3.8/site-packages/huggingface_hub/file_download.py:1150: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+/home/dveytia/.local/lib/python3.8/site-packages/tensorflow_addons/utils/tfa_eol_msg.py:23: UserWarning: 
+
+TensorFlow Addons (TFA) has ended development and introduction of new features.
+TFA has entered a minimal maintenance and release mode until a planned end of life in May 2024.
+Please modify downstream libraries to take dependencies from other repositories in our TensorFlow community (e.g. Keras, Keras-CV, and Keras-NLP). 
+
+For more information see: https://github.com/tensorflow/addons/issues/2807 
+
+  warnings.warn(
+/home/dveytia/.local/lib/python3.8/site-packages/huggingface_hub/file_download.py:1150: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+/home/dveytia/.local/lib/python3.8/site-packages/tensorflow_addons/utils/tfa_eol_msg.py:23: UserWarning: 
+
+TensorFlow Addons (TFA) has ended development and introduction of new features.
+TFA has entered a minimal maintenance and release mode until a planned end of life in May 2024.
+Please modify downstream libraries to take dependencies from other repositories in our TensorFlow community (e.g. Keras, Keras-CV, and Keras-NLP). 
+
+For more information see: https://github.com/tensorflow/addons/issues/2807 
+
+  warnings.warn(
+/home/dveytia/.local/lib/python3.8/site-packages/huggingface_hub/file_download.py:1150: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Traceback (most recent call last):
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/indexes/base.py", line 3802, in get_loc
+    return self._engine.get_loc(casted_key)
+  File "pandas/_libs/index.pyx", line 138, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas/_libs/index.pyx", line 165, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas/_libs/hashtable_class_helper.pxi", line 5745, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas/_libs/hashtable_class_helper.pxi", line 5753, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'codis_benefit'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "08_binary_codis_benefit_selection.py", line 96, in <module>
+    cw = df[(df['random_sample']==1) & (df[targetVar]==0)].shape[0] / df[(df['random_sample']==1) & (df[targetVar]==1)].shape[0]
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/frame.py", line 3807, in __getitem__
+    indexer = self.columns.get_loc(key)
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/indexes/base.py", line 3804, in get_loc
+    raise KeyError(key) from err
+KeyError: 'codis_benefit'
+Traceback (most recent call last):
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/indexes/base.py", line 3802, in get_loc
+    return self._engine.get_loc(casted_key)
+  File "pandas/_libs/index.pyx", line 138, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas/_libs/index.pyx", line 165, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas/_libs/hashtable_class_helper.pxi", line 5745, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas/_libs/hashtable_class_helper.pxi", line 5753, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'codis_benefit'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "08_binary_codis_benefit_selection.py", line 96, in <module>
+    cw = df[(df['random_sample']==1) & (df[targetVar]==0)].shape[0] / df[(df['random_sample']==1) & (df[targetVar]==1)].shape[0]
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/frame.py", line 3807, in __getitem__
+    indexer = self.columns.get_loc(key)
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/indexes/base.py", line 3804, in get_loc
+    raise KeyError(key) from err
+KeyError: 'codis_benefit'
+Traceback (most recent call last):
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/indexes/base.py", line 3802, in get_loc
+    return self._engine.get_loc(casted_key)
+  File "pandas/_libs/index.pyx", line 138, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas/_libs/index.pyx", line 165, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas/_libs/hashtable_class_helper.pxi", line 5745, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas/_libs/hashtable_class_helper.pxi", line 5753, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'codis_benefit'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "08_binary_codis_benefit_selection.py", line 96, in <module>
+    cw = df[(df['random_sample']==1) & (df[targetVar]==0)].shape[0] / df[(df['random_sample']==1) & (df[targetVar]==1)].shape[0]
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/frame.py", line 3807, in __getitem__
+    indexer = self.columns.get_loc(key)
+  File "/home/dveytia/.conda/envs/distilbert/lib/python3.8/site-packages/pandas/core/indexes/base.py", line 3804, in get_loc
+    raise KeyError(key) from err
+KeyError: 'codis_benefit'
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+mpiexec detected that one or more processes exited with non-zero status, thus causing
+the job to be terminated. The first process to do so was:
+
+  Process name: [[35148,1],0]
+  Exit code:    1
+--------------------------------------------------------------------------
