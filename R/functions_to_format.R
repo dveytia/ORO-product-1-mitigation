@@ -1,3 +1,150 @@
+
+#' Extract all affiliation countries from affiliation metadata
+
+extract_all_affiliation <- function(affiliation, countries_ls, collapse=", "){
+  
+  extract_all_countries <- function(text_vector, countries) {
+    extracted <- stringr::str_extract_all(text_vector, countries)
+    extracted <- lapply(extracted, unique)
+    extracted <- sapply(extracted, function(x) paste(x, collapse = collapse))
+    extracted[extracted == "NA"] <- NA
+    extracted[extracted == ""] <- NA
+    return(extracted)
+  }
+  
+  ### 1st extraction
+  ### Carrefull modification of coutries name in the affiliation 
+  ### column to match with countries_ls names
+  affiliation <- stringr::str_replace_all(affiliation, c("Georgia"                     = "GeorgiA", # To differentiate it from University of Georgia
+                                                         "England\\."                  = "United Kingdom.",
+                                                         "Papua N Guinea"              = "Papua New Guinea",
+                                                         "\\, ENGLAND"                 = ", United Kingdom",
+                                                         "Engl\\,"                     = "United Kingdom,", # cf ref 378521
+                                                         "Univ\\ New\\ S\\ Wales" = "Univ.New.S.Wales", # to avoid transforming it to UK since it is an Australian univ.
+                                                         "Wales\\."                       = "United Kingdom", 
+                                                         "New South United Kingdom"    = "New South Wales", # ref 259903
+                                                         "South United Kingdom"        = "South Wales", # ref 327284
+                                                         "WALES\\."                       = "United Kingdom",
+                                                         "Scotland\\."                 = "United Kingdom", # \\ to avoid replacing in ref 353573 and other
+                                                         # "Irel,"                       = "United Kingdom.",
+                                                         # "\\, North Ireland\\."        = ", United Kingdom.",
+                                                         # "\\,NORTH IRELAND\\."         = ", United Kingdom.",
+                                                         # "\\, Ireland\\."              = ", United Kingdom.",
+                                                         # "North Irel"                  = "United Kingdom",
+                                                         "Irel,"                       = "Ireland.",
+                                                         "\\, North Ireland\\."        = ", Ireland.",
+                                                         "\\,NORTH IRELAND\\."         = ", Ireland.",
+                                                         "\\, Ireland\\."              = ", Ireland.",
+                                                         "North Irel"                  = "Ireland",
+                                                         "\\(British\\)"               = "United Kingdom",
+                                                         "Great Britain"               = "United Kingdom",
+                                                         "\\, Scotl$"                  = ", United Kingdom",
+                                                         "\\,USA\\."                   = "United States",
+                                                         "\\,USA"                   = "United States",
+                                                         "USA"                   = "United States",
+                                                         "\\, USA\\,"                  = "United States",
+                                                         "\\ USA\\."                   = ", United States",
+                                                         "\\, U.S.A"                   = ", United States",
+                                                         "Iowa U.S.A"                  = "Iowa, United States",
+                                                         "Russia\\."                   = "Russian Federation",
+                                                         "RUSSIA\\."                   = "Russian Federation",
+                                                         "\\, USSR\\,"                 = ", Russian Federation,",
+                                                         "\\, Iran"                    = ", Islamic Republic of Iran",
+                                                         "\\,ITALY."                   = ", Italy",
+                                                         "\\,NORWAY."                  = ", Norway",
+                                                         "Tanzania"                    = "United Republic Of Tanzania",
+                                                         "\\, North Macedonia"         = ", The Former Yugoslav Republic of Macedonia",
+                                                         "\\, AUSTRALIA\\."            = ", Australia",
+                                                         "Macau"                       = "Macao",
+                                                         "Macaolay"                    = "Macaulay", # ref 203560
+                                                         "\\, Can\\,"                  = ", Canada,",
+                                                         "\\, CANADA"                  = ", Canada",
+                                                         "\\,CANADA"                   = ", Canada",
+                                                         "\\, Viet Nam"                = ", Vietnam",
+                                                         "\\,VIETNAM\\."               = ", Vietnam",
+                                                         "\\,JAPAN\\."                 = ", Japan",
+                                                         "\\, Jpn"                     = ", Japan",
+                                                         "\\, PHILIPPINES\\."          = ", Philippines",
+                                                         "\\,PHILIPPINES\\."           = ", Philippines",
+                                                         "U Arab Emirates"             = "United Arab Emirates",
+                                                         "\\,BELGIUM\\."               = ", Belgium.",
+                                                         "\\, SWITZERLAND\\."          = ", Switzerland.",
+                                                         "\\,SWITZERLAND\\."           = ", Switzerland.",
+                                                         "\\, NORWAY\\."               = ", Norway",
+                                                         "\\,NORWAY\\."                = ", Norway",
+                                                         "Trinidad Tobago"             = "Trinidad and Tobago",
+                                                         "\\,INDIA\\."                 = ", India.",
+                                                         "\\,SOUTH AFRICA\\."          = ", South Africa.",
+                                                         "\\,CYPRUS\\."                = ", Cyprus.",
+                                                         "\\,FRANCE\\."                = ", France.",
+                                                         "\\,SPAIN\\."                 = ", Spain.",
+                                                         "\\,ECUADOR\\."               = ", Ecuador.",
+                                                         "\\, FRANCE\\."               = ", France.",
+                                                         "\\,SWEDEN\\."                = ", Sweden.",
+                                                         "\\,GERMANY\\."               = ", Germany.",
+                                                         "French Guiana"               = "France",
+                                                         "West Ger"                    = "Germany",
+                                                         "\\, NETHERLANDS\\."          = ", Netherlands.",
+                                                         "\\,NETHERLANDS\\."           = ", Netherlands.",
+                                                         "\\,UKRAINE\\."               = ", Ukraine.",
+                                                         "\\,ISRAEL\\."                = ", Israel.",
+                                                         "\\,EGYPT\\."                 = ", Egypt.",
+                                                         "\\,POLAND\\."                = ", Poland.",
+                                                         "\\,FINLAND\\."               = ", Finland.",
+                                                         "\\,SRI LANKA\\."             = ", Sri Lanka.",
+                                                         "\\,HONG KONG\\."             = ", Hong Kong.",
+                                                         "Korea (the Republic of)"     = "Republic of Korea",
+                                                         "\\,DENMARK\\."               = ", Denmark.",
+                                                         "\\, DENMARK\\."              = ", Denmark.",
+                                                         "\\,INDONESIA\\."             = ", Indonesia.",
+                                                         "\\, PANAMA."                 = ", Panama",
+                                                         "\\,GAMBIA\\."                = ", Gambia.",
+                                                         "\\, SINGAPORE"               = ", Singapore.",
+                                                         "\\,GREECE\\."                = ", Greece.",
+                                                         "\\,ENGLAND\\."               = ", United Kingdom.",
+                                                         "\\, ENGLAND\\."              = ", United Kingdom.",
+                                                         "\\,SCOTLAND\\."              = ", United Kingdom.",
+                                                         "\\,MEXICO\\."                = ", Mexico.",
+                                                         "\\,HUNGARY\\."               = ", Hungary.",
+                                                         "\\,AUSTRALIA\\."             = ", Australia.",
+                                                         "\\, JAPAN\\."                = ", Japan.",
+                                                         "\\, S Afr"                   = ", South Africa",
+                                                         "\\,MALAYSIA\\."              = ", Malaysia.",
+                                                         "Syria"                       = "Syrian Arab Republic",
+                                                         "Marshall Island"             = "Marshall Islands",
+                                                         "\\, Micronesia."             = "Federated States of Micronesia",
+                                                         "\\, Moldova."                = "Republic of Moldova",
+                                                         "\\, Peoples R China."        = "China",
+                                                         "Korea \\(the Republic of\\)" = "Republic of Korea"))  
+  affiliation_out = extract_all_countries(affiliation, paste(countries_ls$name_en, collapse = "|"))
+  
+  
+  ### 2nd extraction 
+  ### Carrefull modification of coutries name in the affiliation 
+  ### column to match with countries_ls names
+  affiliation[is.na(affiliation_out)] = stringr::str_replace_all(affiliation[is.na(affiliation_out)], 
+                                                                 c("UK"              = "United Kingdom",
+                                                                   "\\, U.K"         = "United Kingdom",
+                                                                   "\\, Norw"        = "Norway",
+                                                                   "\\, Can"         = "Canada,",
+                                                                   "\\, Finl"        = ", Finland",
+                                                                   "\\, Belg\\,"     = ", Belgium",
+                                                                   "\\, Switz\\,"    = ", Switzerland.",
+                                                                   "Fr"              = "France",
+                                                                   "Swed"            = "Sweden",
+                                                                   "Isr"             = "Israel",
+                                                                   "Port"            = "Portugal",
+                                                                   "\\, Hong Kong"   = ", China",
+                                                                   "\\, HONG KONG"   = ", China"))
+  affiliation_out[is.na(affiliation_out)] <- extract_all_countries(affiliation[is.na(affiliation_out)], paste(countries_ls$name_en, collapse = "|"))
+  
+  return(affiliation_out)
+  
+}
+
+
+
+
 #' Extract The Affiliation Of The First Author Of Each Paper
 #'
 #' @param data a dataframe with at least two column called analysis_id and affiliation

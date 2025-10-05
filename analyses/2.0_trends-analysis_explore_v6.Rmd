@@ -254,7 +254,7 @@ plotList <- list(oroTimeseries_ggp,
                  )
 
 combined <- wrap_plots(plotList, nrow=2, heights=c(1,1))+
-  plot_annotation(tag_levels = "a")&theme(plot.tag.position = c(0, 1))
+  plot_annotation(tag_levels = "a", tag_suffix = ")")&theme(plot.tag.position = c(0, 1))
 
 
 ## Save
@@ -477,7 +477,7 @@ combined <- wrap_plots(plotList,
                        widths = c(1,5,0.2,0.2),
                        heights = c(1,2)
                        )+
-  plot_annotation(tag_levels = "a")
+  plot_annotation(tag_levels = "a", tag_suffix = ")")
 
 
 ## Save
@@ -569,7 +569,7 @@ combined <- wrap_plots(plotList,
                        design = plotLay,
                        widths = c(1,1,2.5)
                        )+
-  plot_annotation(tag_levels = "a")
+  plot_annotation(tag_levels = "a", tag_suffix = ")")
 
 
 ## Save
@@ -1480,7 +1480,7 @@ plotList <- c(
 
 combined <- wrap_plots(plotList, ncol=3,
                        guides="collect", widths = c(1.6, 1,1))+
-  plot_annotation(tag_levels = "a")
+  plot_annotation(tag_levels = "a", tag_suffix = ")")
 
 ggsave(
   here::here("figures/main/conceptual_networks_heatmaps_qnm.pdf"),
@@ -1756,6 +1756,41 @@ ggsave(
 
 ```
 
+```{r plot just significant regression plots}
+
+ggps_prop_tagged_signif <- mapply(
+  function(p, tag) p + 
+    labs(tag = tag) + 
+    theme(#legend.position = "none",
+          plot.tag.position = c(0, 1.1),  # top-left like ggpubr
+          plot.tag = element_text(size = 10, hjust = 0, vjust = 1.2),
+          plot.margin = unit(c(1,0.3,0,0.3),"cm")
+          ),
+  ggps_prop[c("legislation","public support")],
+  paste0(letters[1:2], ") ", 
+         componentAES$label[match(c("legislation","public support"), componentAES$level)]),
+  SIMPLIFY = FALSE
+)
+
+combined <- wrap_plots(ggps_prop_tagged_signif, ncol = 2)
+
+
+# Combine plots with legend on the right
+final_plot <- combined + leg +theme(plot.margin = unit(c(0.1,0,0,0.1),"cm")) + 
+  plot_layout(ncol = 3, widths = c(4,4, 2), byrow=FALSE)  # adjust widths as needed
+
+
+ggsave(
+  filename = here::here("figures/poster/GlmFitPlots_signif_proportion.png"),
+  plot = final_plot,
+  width = 9,
+  height = 4,
+  dpi=2000
+)
+
+
+```
+
 ```{r combine regression plots with plots of distribution by ORO type}
 
 ## Get data and plot distribution by oro for the different dimensions 
@@ -1848,7 +1883,7 @@ combined <- wrap_plots(ggps_prop_leg, guides = "collect")
 plotLayout<-"AB
 #B"
 
-combined2 <- dist_component_ggp_bottom + combined + plot_annotation(tag_levels = "a")+plot_layout(widths = c(1.2,3), heights=c(1,0.2), design = plotLayout)
+combined2 <- dist_component_ggp_bottom + combined + plot_annotation(tag_levels = "a", tag_suffix = ")")+plot_layout(widths = c(1.2,3), heights=c(1,0.2), design = plotLayout)
 
 
 ggsave(
@@ -2237,6 +2272,9 @@ oro_groups <- list(
   "narrative" = c("MRE-Located", "CDR-OAE","Efficiency")
 )
 
+## View summary table of cutpoints
+View(cutpoint_results %>% filter(oro_type %in% oro_groups$narrative) %>% pivot_wider(id_cols = c(oro_type, cp_id, component, variable_name), names_from = quantile, values_from = year))
+
 
 ## Plot time series by group
 ggps <- vector("list", length(oro_groups))
@@ -2336,7 +2374,9 @@ for(og in 1:length(oro_groups)){
 }
 
 ## Plot just efficiency for method figure
-eff_allComponents <- ggps[[which(names(oro_groups)=="Other")]][which(oro_groups$Other == "Efficiency")]
+eff_allComponents <- ggps[[which(names(oro_groups)=="Other")]][which(oro_groups$Other == "Efficiency")][[1]]
+eff_allComponents$layers[[which(names(eff_allComponents$layers)=="geom_rect")]]<- NULL
+
 
 ggsave(
   here::here("figures/supplemental/allComponents_efficiency.png"),
@@ -2404,7 +2444,7 @@ plotLayout <- "AAA
               BCD"
 
 combined_patchwork <- wrap_plots(plotList, design = plotLayout, heights=c(0.2,1)) +
-    plot_annotation(tag_levels = 'a')
+    plot_annotation(tag_levels = 'a', tag_suffix = ")")
 
 ggsave(
   here::here("figures/main/allComponents_narrative_intPolicy.pdf"),

@@ -1,0 +1,347 @@
+---
+title: "mCDR research in France Oct 2025"
+author: "Devi Veytia"
+date: "2024-02-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set up
+
+```{r load libraries}
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(RSQLite)
+library(ggplot2)
+library(gcookbook)
+```
+
+
+
+
+
+
+```{r Retrieve and format data - skip and load from prev chunk, eval = FALSE}
+
+
+## Get data
+## Subset to only mCDR options
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+uniquerefs <- tbl(p1_db, "uniquerefs_update2025") %>%
+  select(analysis_id, year, affiliation) 
+
+mCDR_df <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+  filter(level %in% c("CDR.BC", "CDR.BioPump", "CDR.OAE")) %>%
+  left_join(uniquerefs, by = "analysis_id") %>%
+  collect()
+
+dbDisconnect(p1_db)
+
+
+
+## Get list of countries and codes
+countries_ls <- data.frame(name_en = countrycode::codelist$country.name.en) %>%
+  mutate(country_iso = countrycode::countrycode(sourcevar   = name_en,
+                                       origin      = "country.name",
+                                       destination = "iso3c"),
+         country=name_en)
+
+
+## Extract countries from affiliation
+source(here::here("R", "functions_to_format.R"))
+
+mCDR_df$countries <- extract_all_affiliation(mCDR_df$affiliation, countries_ls)
+mCDR_df$oro_type <- factor(mCDR_df$level,
+                           levels = c("CDR.OAE","CDR.BC", "CDR.BioPump"),
+                           labels = c("CDR-OAE","CDR-Blue carbon", "CDR-Biol. C. Pump")
+                           )
+
+save(mCDR_df, file = here::here("data", "derived-data", "mCDR_affiliation_country_matches.RData"))
+```
+
+```{r subset to the top 10 countries}
+
+## Identify the top 10 countries
+affTypeTop10 <- strsplit(mCDR_df$countries[!duplicated(mCDR_df$analysis_id)], ", ") %>% unlist() %>% table %>% sort(decreasing = TRUE)
+
+if(!("France" %in% names(affTypeTop10 %>% head(10)))){
+  affTypeTop10 <- rbind(affTypeTop10 %>% head(10), affTypeTop10[affTypeTop10 == "France"])
+}else{
+  affTypeTop10 <- affTypeTop10 %>% head(10)
+}
+affTypeTop10 <- affTypeTop10[!duplicated(affTypeTop10)]
+affTypeTop10 <- names(affTypeTop10)
+
+
+# subset data to these countries
+
+mCDR_df_top10 <- mCDR_df %>%
+  filter(grepl(paste(affTypeTop10, collapse = "|"), countries)) %>%
+  # explode data frame so that its long form
+  mutate(
+    country = str_split(countries, ",\\s*"),
+    country = map(country, ~ unique(str_trim(str_replace_all(.x, "^['\"]|['\"]$", ""))))
+  ) %>%
+  unnest(country) %>%
+  filter(!is.na(country), country != "") %>%
+  # add weighting 
+  group_by(analysis_id) %>%
+  mutate(
+    weight = 1/n(),
+    count = 1
+  ) %>%
+  filter(country %in% affTypeTop10)
+  
+# View(mCDR_df_top10)
+
+
+
+
+
+## Save
+save(mCDR_df_top10, file = here::here("data/derived-data/mCDR_top10_affiliation_country_matches.RData"))
+
+```
+
+
+
+
+# Plots
+
+
+
+````{r plot a cumulative time series of the top 10 countries}
+load(here::here("data/derived-data/mCDR_top10_affiliation_country_matches.RData"))
+
+top10 <- with(mCDR_df_top10, table(country))
+top10 <- top10[order(top10, decreasing = TRUE)]
+myPal <- viridis::mako(length(top10))
+myPal[which(names(top10) == "France")] <- "orange"
+names(myPal) <- names(top10)
+
+timeseries_ggp <- mCDR_df_top10 %>%
+  filter(!is.na(year)) %>%
+  mutate(country = factor(country, levels = names(top10))) %>%
+  group_by(year, country) %>%
+  summarise(n_articles = sum(weight)) %>%
+  mutate(year_date = as.Date(paste0(year,"-01-01"))) %>% 
+  filter(year_date < as.Date("2023-01-01")) %>%
+  
+  ggplot(aes(x = year_date, y = n_articles, fill = country)) +
+  geom_area(colour = "black", size = .2, alpha = .4) +
+  #scale_fill_brewer(palette = "Blues")+
+  scale_fill_manual(values = myPal) +
+  scale_x_date()+
+  labs(x="Year", y ="N articles", fill = "Country")+
+  theme_bw()+
+  guides(fill=guide_legend(nrow=3))+
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size=13),
+    axis.text.y = element_text(size=13),
+    legend.text = element_text(size=13),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    legend.title = element_text(size=15),
+    plot.background = element_rect(fill="transparent"),
+    panel.background = element_rect(fill="transparent"),
+    legend.background = element_rect(fill="transparent")
+  )
+
+timeseries_ggp
+
+ggsave(timeseries_ggp,
+       filename = here::here("figures/poster/mCDR_country_timeseries.png"),
+       width = 7, height = 5, dpi = 1000,bg = NULL)
+
+```
+
+
+
+
+```{r}
+
+load(here::here("data", "derived-data", "mCDR_affiliation_country_matches.RData"))
+
+
+timeseriesMethod_ggp <- mCDR_df %>%
+  filter(!is.na(year)) %>%
+  mutate(year = as.numeric(year)) %>%
+  group_by(oro_type, year) %>%
+  summarise(
+    n_articles = n_distinct(analysis_id)
+  ) %>%
+  
+  ggplot(aes(x = year, y = n_articles, fill = oro_type)) +
+  geom_area(colour = "black", size = .2) +
+  scale_fill_brewer(palette = "Dark2")+
+  #scale_fill_manual(values = myPal) +
+  scale_x_continuous()+
+  labs(x="Year", y ="N articles", fill = "mCDR\nmethod")+
+  theme_minimal(base_size = 13)+
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size=13),
+    axis.text.y = element_text(size=13),
+    legend.text = element_text(size=13),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    legend.title = element_text(size=15),
+    plot.background = element_rect(fill="transparent"),
+    panel.background = element_rect(fill="transparent"),
+    legend.background = element_rect(fill="transparent", colour = "transparent")
+  )
+
+timeseriesMethod_ggp
+
+ggsave(timeseriesMethod_ggp,
+       filename = here::here("figures/poster/timeseriesMethod_ggp.png"),
+       width = 7, height = 5, dpi = 1000,bg = NULL)
+
+
+
+
+## and also facet by ORO type
+mCDR_totals <- mCDR_df %>% 
+  group_by(oro_type) %>% 
+  summarise(n_articles = n_distinct(analysis_id), .groups = "drop") %>% 
+  mutate(total = sum(n_articles),
+         percent_articles = scales::number(n_articles/total*100, accuracy = 1))
+mCDR_totals$label <- paste0(mCDR_totals$percent_articles, "%")
+
+timeseriesFacet_ggp <- mCDR_df %>%
+  filter(!is.na(year)) %>%
+  mutate(year = as.numeric(year)) %>%
+  group_by(oro_type, year) %>%
+  summarise(
+    n_articles = n_distinct(analysis_id),
+    n_upper = n_distinct(analysis_id[0.5 <= mean_prediction-std_prediction]),
+    n_lower = n_distinct(analysis_id[0.5 <= mean_prediction+std_prediction])
+  ) %>%
+  
+  ggplot(aes(x = year)) +
+  facet_wrap(vars(oro_type), nrow=1, scales="free_y")+
+  geom_line(aes(y = log(n_articles), color = oro_type)) +
+  geom_ribbon(aes(ymin = log(n_lower), ymax=log(n_upper), fill = oro_type), alpha=0.5)+
+  geom_text(data = mCDR_totals, aes(label = label), 
+            x=-Inf, y=Inf, inherit.aes = FALSE, vjust=1, hjust=0)+
+  scale_fill_brewer(palette = "Dark2")+
+  scale_color_brewer(palette = "Dark2")+
+  #scale_fill_manual(values = myPal) +
+  scale_x_continuous()+
+  labs(x="Year", y ="log(N articles)", fill = "mCDR method", color = "mCDR method")+
+  theme_minimal(base_size = 13)+
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(size=13),
+    axis.text.y = element_text(size=13),
+    legend.text = element_text(size=13),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    legend.title = element_text(size=15),
+    strip.text = element_text(size=16),
+    plot.background = element_rect(fill="transparent"),
+    panel.background = element_rect(fill="transparent"),
+    legend.background = element_rect(fill="transparent", colour = "transparent")
+  )
+
+timeseriesFacet_ggp
+
+ggsave(timeseriesFacet_ggp,
+       filename = here::here("figures/poster/timeseriesFacet_ggp.png"),
+       width = 13, height = 5, dpi = 1000,bg = NULL)
+
+
+
+## plot percent contribution 
+percentContribution <- mCDR_df %>%
+  filter(!is.na(year)) %>%
+  mutate(year = as.numeric(year)) %>%
+  # left_join(yearlyTotals, by = "year") %>%
+  group_by(oro_type, year) %>%
+  summarise(
+    n = n_distinct(analysis_id),
+    .groups = "drop"
+  )%>%
+  group_by(year) %>%
+  mutate(
+    total_articles = sum(n)
+  )%>%
+  ungroup() %>%
+  mutate(
+    percent_contribution = n/total_articles
+  )
+
+summary(percentContribution)
+percentContribution %>% group_by(year) %>% summarise(sum = sum(percent_contribution)) %>% summary
+
+timeseriesMethodPercent_ggp <- percentContribution %>% 
+  ggplot(aes(x = year, y = percent_contribution, fill = oro_type)) +
+  geom_col(position = "stack") +
+  scale_fill_brewer(palette = "Dark2")+
+  #scale_fill_manual(values = myPal) +
+  scale_x_continuous()+
+  labs(x="Year", y ="% articles", fill = "mCDR method")+
+  # guides(fill=guide_legend(nrow=2,byrow=TRUE))+
+  theme_minimal(base_size = 13)+
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size=13),
+    axis.text.y = element_text(size=13),
+    legend.text = element_text(size=13),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    legend.title = element_text(size=15),
+    plot.caption = element_text(size = 14, face = "italic"),
+    plot.background = element_rect(fill="transparent"),
+    panel.background = element_rect(fill="transparent"),
+    legend.background = element_rect(fill="transparent", colour = "transparent")
+  )
+
+timeseriesMethodPercent_ggp
+
+
+
+
+
+
+
+# timeseriesMethodCombined <- egg::ggarrange(
+#   timeseriesMethod_ggp + theme(plot.margin = unit(c(1,2,0.5,1), "cm")), 
+#   timeseriesMethodPercent_ggp+ theme(plot.margin = unit(c(1,2,0.6,1), "cm")),
+#   nrow = 2, ncol = 1,
+#   heights = c(1,0.8),
+#   labels = c("a. Total number of articles","b. Percent contribution"))
+# 
+# 
+# ggsave(timeseriesMethodCombined,
+#   filename = here::here("figures/mCDR_research_in_france_March2024/timeseriesByMethod.png"),
+#        width = 8.5, height = 8, dpi = 600)
+
+```
+
+```{r plot all mCDR plots as multi panel}
+require(patchwork)
+
+plotList <- list(timeseries_ggp, timeseriesMethod_ggp, timeseriesFacet_ggp)
+
+plotLay <- "AB
+CC"
+combined <- wrap_plots(plotList, design = plotLay, heights = c(1,1), widths = c(1,1))+
+  plot_annotation(tag_levels = "a", tag_suffix = ")")
+
+ggsave(combined,
+       filename = here::here("figures/poster/mCDR_multipanel_timeseries.png"),
+       width = 13, height = 10, dpi = 1000,bg = NULL)
+
+
+```
+
+
