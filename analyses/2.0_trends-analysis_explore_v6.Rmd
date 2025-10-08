@@ -1710,12 +1710,12 @@ modelResultsPropTable[,3:6] <- apply(modelResultsPropTable[,3:6],1:2, function(x
 
 
 
-## save
-
-write.csv(
-  modelResultsPropTable,row.names = FALSE,
-  here::here("outputs/publications_otherDim_glmResults_proportion.csv")
-)
+# ## save
+# 
+# write.csv(
+#   modelResultsPropTable,row.names = FALSE,
+#   here::here("outputs/publications_otherDim_glmResults_proportion.csv")
+# )
 
 
 
@@ -1759,16 +1759,18 @@ ggsave(
 ```{r plot just significant regression plots}
 
 ggps_prop_tagged_signif <- mapply(
-  function(p, tag) p + 
-    labs(tag = tag) + 
+  function(p, varname, tag) p + 
+    labs(y=varname, tag = tag) + 
     theme(#legend.position = "none",
           plot.tag.position = c(0, 1.1),  # top-left like ggpubr
           plot.tag = element_text(size = 10, hjust = 0, vjust = 1.2),
           plot.margin = unit(c(1,0.3,0,0.3),"cm")
           ),
   ggps_prop[c("legislation","public support")],
+  c("Relative N legislation documents","Relative N positive posts"),
   paste0(letters[1:2], ") ", 
-         componentAES$label[match(c("legislation","public support"), componentAES$level)]),
+         # componentAES$label[match(c("legislation","public support"), componentAES$level)]),
+         c("Legislation","Positive social media posts")),
   SIMPLIFY = FALSE
 )
 
