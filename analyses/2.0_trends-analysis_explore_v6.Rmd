@@ -83,6 +83,7 @@ load(here::here("data/derived-data/mitigationPostsDat.RData")) # postsDat
 
 
 
+
 year_lim <- c(2000, 2024) # years to analyse
 
 # components to analyse
@@ -103,6 +104,8 @@ allComponentDat_model <- pubs %>%
   filter(
     component %in% selectedComponents
   )
+
+
 
 
 ```
@@ -2265,7 +2268,7 @@ save(cutpoint_results,cutpoint_densities, file=here::here("outputs/cutpointResul
 ```{r plot all time series and international policy moments, eval=FALSE}
 load(here::here("outputs/cutpointResults_mitigation_alloros.RData"))
 
-savePlot = TRUE
+savePlot = FALSE
 
 oro_groups <- list(
   "mCDR" = c("CDR-BioPump","CDR-BC","CDR-OAE"),
@@ -2274,8 +2277,8 @@ oro_groups <- list(
   "narrative" = c("MRE-Located", "CDR-OAE","Efficiency")
 )
 
-## View summary table of cutpoints
-View(cutpoint_results %>% filter(oro_type %in% oro_groups$narrative) %>% pivot_wider(id_cols = c(oro_type, cp_id, component, variable_name), names_from = quantile, values_from = year))
+# ## View summary table of cutpoints
+# View(cutpoint_results %>% filter(oro_type %in% oro_groups$narrative) %>% pivot_wider(id_cols = c(oro_type, cp_id, component, variable_name), names_from = quantile, values_from = year))
 
 
 ## Plot time series by group
@@ -2395,7 +2398,8 @@ intPolMoments <- readxl::read_excel(
     year_min = as.numeric(year_min),
     year_max = as.numeric(year_max),
     component = "International policy"
-  )
+  ) %>%
+  filter(plot==TRUE)
 
 tmpYlims <- c(min(intPolMoments$year_min), max(intPolMoments$year_max)+2)
 
@@ -2456,6 +2460,270 @@ ggsave(
 
 ```
 
+```{r plot all time series and international policy moments grouped by country, eval=FALSE}
+load(here::here("outputs/cutpointResults_mitigation_alloros.RData"))
+
+# Grouped by country
+# Load data for specific OROs
+load(here::here("data", "derived-data", "mitigationORO_pubs_country.RData")) #pubs
+load(here::here("data", "derived-data", "n_policy_leg_country.RData")) # leg_pol_country
+load(here::here("data/derived-data/mitigationDeployDat_country.RData")) # allDeployDat_country
+
+# bind together
+allComponentDat_model_country <- pubs_country %>%
+  bind_rows(leg_pol_country) %>%
+  bind_rows(allDeployDat_country) %>%
+  bind_rows(postsDat) %>%
+  mutate(
+    component = replace(component, component == "non-binding policy", "policy")
+  ) %>%
+  filter(year_lim[1] <= year & year <= year_lim[2],
+         oro_type %in% typeAES$level) %>%
+  filter(
+    component %in% selectedComponents
+  )
+
+
+savePlot = FALSE
+
+oro_groups <- list(
+  "mCDR" = c("CDR-BioPump","CDR-BC","CDR-OAE"),
+  "MRE" = c("MRE-Ocean","MRE-Located","MRE-Bio"),
+  "Other"= c("CCS","Efficiency"),
+  "narrative" = c("MRE-Located", "CDR-OAE","Efficiency")
+)
+
+## View summary table of cutpoints
+View(cutpoint_results %>% filter(oro_type %in% oro_groups$narrative) %>% pivot_wider(id_cols = c(oro_type, cp_id, component, variable_name), names_from = quantile, values_from = year))
+
+
+## Plot time series by group
+ggps_country <- vector("list", length(oro_groups))
+
+for(og in which(names(oro_groups)=="narrative")){
+  
+  ggps_country[[og]] <- vector("list", length(oro_groups[[og]]))
+  
+  for(o in 1:length(oro_groups[[og]])){
+    # get data
+    tmpDat <- allComponentDat_model %>%
+      filter(oro_type == oro_groups[[og]][o], !is.na(year), component %in% selectedComponents) %>%
+      mutate(
+        y = ifelse(component %in% 
+                     c("deployment"), y, log(y))
+      )
+    
+    # Maybe scale by proportion?
+    maxy <- tmpDat %>%
+      group_by(component, year)%>%
+      summarise(
+        maxy = max(y, na.rm=T)
+      )
+    
+    tmpDat_country <- allComponentDat_model_country %>%
+      filter(oro_type == oro_groups[[og]][o], !is.na(year), component %in% selectedComponents, !is.na(country_simple)) %>%
+      group_by(component, variable_name, country_simple, year)%>%
+      summarise(
+        y_c=sum(y)
+      )%>%
+      group_by(component, variable_name, year) %>%
+      mutate(
+        y_total = sum(y_c)
+      ) %>%
+      ungroup()%>%
+      left_join(maxy, by=c("component","year")) %>%
+      mutate(
+        y_prop = y_c/y_total,
+        y = y_prop*maxy
+      )
+    
+    # format for manual geom_area
+    if(!is.null(tmpDat_country)){
+      df_min <- tmpDat_country %>%
+        group_by(component) %>%
+        summarise(ymin = min(y[is.finite(y)]))
+      tmpDat_country <- tmpDat_country %>%
+        left_join(df_min, by = "component") %>%
+        group_by(component, year) %>%
+        arrange(component, year, desc(country_simple)) %>%
+        mutate(
+          ymin_stack = ymin + cumsum(dplyr::lag(abs(y), default = 0)),
+          ymax_stack = ymin + cumsum(abs(y))
+        ) %>%
+        ungroup()
+    }
+    
+      
+    
+    actionMetric <- tmpDat$variable_name[tmpDat$component == "deployment"][1]
+    facetLabels <- c("Action" = paste0("Action\n(", actionMetric, ")"),
+                     "Publications" = "Publications\nlog(N articles)",
+                     "Policy" = "Policy\nlog(N documents)",
+                     "Legislation" = "Legislation\nlog(N documents)",
+                     "Interest" = "Interest\nlog(N posts)",
+                     "Support" = "Support\nlog(N positive posts + likes)"
+                     # "Opposition" = "Opposition\nlog(N negative posts + likes)"
+                     )
+    
+    tmpDat <- tmpDat %>%
+      mutate(
+        component_color = factor(component, levels = componentAES$level, labels = componentAES$colour),
+        component = factor(component, levels = componentAES$level, labels = componentAES$label)
+      ) %>%
+      mutate(
+        component = droplevels(component),
+        component_color = droplevels(component_color)
+      )%>%
+      mutate(
+        component = plyr::revalue(component, facetLabels)
+      )
+    
+    
+    if(!is.null(tmpDat_country)){
+      tmpDat_country <- tmpDat_country %>%
+        mutate(
+          component_color = factor(component, levels = componentAES$level, labels = componentAES$colour),
+          component = factor(component, levels = componentAES$level, labels = componentAES$label)
+        ) %>%
+        mutate(
+          component = droplevels(component),
+          component_color = droplevels(component_color)
+        )%>%
+        mutate(
+          component = plyr::revalue(component, facetLabels)
+        )
+    }
+    
+    # Get cutpoints
+    changePointsQuantiles <- cutpoint_results %>%
+      filter(oro_type == oro_groups[[og]][o], component %in% selectedComponents) %>%
+      pivot_wider(names_from = quantile, values_from = year)%>%
+      mutate(iqr = `97.5%`-`2.5%`)%>%
+      filter(iqr < 5) %>%
+      select(-iqr)%>%
+      pivot_longer(cols = `2.5%`:`97.5%`, names_to = "quantile", values_to = "year") %>%
+      mutate(
+        component = factor(component, levels = componentAES$level, labels = componentAES$label)
+      ) %>%
+      mutate(
+        component = plyr::revalue(component, facetLabels)
+      )
+    
+    
+    ggp_tmp <- ggplot()+
+      
+      # geom_vline(data = changePointsQuantiles %>%filter(quantile %in% c("2.5%","97.5%")),
+      #          aes(xintercept=.data$year),
+      #          linewidth = 0.5, linetype = "dashed")+
+      geom_rect(data = changePointsQuantiles %>%filter(quantile %in% c("2.5%","97.5%")) %>% pivot_wider(names_from = "quantile", values_from = year),
+               aes(xmin=.data$`2.5%`, xmax=.data$`97.5%`),
+               ymin=-Inf, ymax=Inf,
+               fill="darkgrey", alpha=0.5)+
+      geom_line(data = tmpDat, aes(x=year, y=y, color=component_color))+
+      geom_rect(data = tmpDat_country, aes(xmin=year-0.5,xmax=year+0.5, ymin = ymin_stack, ymax = ymax_stack, fill=country_simple), alpha = 0.6) +
+      scale_x_continuous(limits = year_lim)+
+      scale_color_identity(guide="none")+
+      scale_fill_manual(
+        breaks = levels(tmpDat_country$country_simple),
+        values = c(RColorBrewer::brewer.pal(4, "Paired"),"grey70")
+      )+
+      facet_wrap(vars(component),ncol=1, scales = "free_y")+
+      labs(
+        y="",
+        x="Year",
+        title = typeAES$label[match(oro_groups[[og]][o], typeAES$level)],
+        fill = "Country\ngroup"
+      )+
+      theme_minimal(base_size = 10)+
+      theme(
+        plot.margin = unit(c(0.1, 0.1,0.1,0.1), units = "cm"),
+        legend.position = "bottom"
+      )
+    ggp_tmp
+    
+    ggps_country[[og]][[o]] <- ggp_tmp
+    
+      
+  }
+  
+  
+}
+
+
+
+
+
+## Plot with international policy moments as well
+intPolMoments <- readxl::read_excel(
+  here::here("data/raw-data/international_policy_moments.xlsx")
+)%>%
+  mutate(
+    year_min = as.numeric(year_min),
+    year_max = as.numeric(year_max),
+    component = "International policy"
+  )
+
+tmpYlims <- c(min(intPolMoments$year_min), max(intPolMoments$year_max)+2)
+
+ggp_intPolMom <- ggplot()+
+  geom_rect(data = intPolMoments,
+           aes(xmin=.data$year_min, xmax=.data$year_max),
+           ymin = -Inf, ymax=Inf,
+           fill="lightpink")+
+  geom_vline(data = intPolMoments,
+           aes(xintercept=.data$year_min),
+           linewidth = 0.5, linetype = "solid", col="red")+
+  geom_text(data = intPolMoments %>%
+              mutate(
+                y= rep(seq(0.1,0.7, length.out=3),ceiling(nrow(intPolMoments)/3))[1:nrow(intPolMoments)]
+              ),
+           aes(x=.data$year_min, y=.data$y, label= stringr::str_wrap(.data$label, width=10)),
+           angle=30, hjust=0, col="black", size=2, nudge_x = 0.2)+
+  scale_x_continuous(limits = tmpYlims)+
+  scale_y_continuous(limits = c(0,1))+
+  labs(
+    y="",
+    x="Year"
+  )+
+  theme_minimal(base_size = 10)+
+  coord_cartesian(clip="off")+
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.margin = unit(c(0.1, 0.1,0.1,0.1), units = "cm")
+  )
+
+ggp_intPolMom
+
+
+
+plotList <- lapply(ggps_country[[which(names(oro_groups)=="narrative")]],
+                   function(x){
+                     x+geom_vline(data = intPolMoments%>% select(year_min),
+                         aes(xintercept=.data$year_min),
+                         linewidth = 0.5, linetype = "solid", col="red")
+                   })
+plotList <- c(
+  list(ggp_intPolMom),
+  plotList
+)
+
+plotLayout <- "AAA
+              BCD"
+
+combined_patchwork <- wrap_plots(plotList, 
+                                 design = plotLayout, heights=c(0.2,1),
+                                 guides = "collect") +
+    plot_annotation(tag_levels = 'a', tag_suffix = ")") &
+  theme(legend.position = "bottom")
+
+ggsave(
+  here::here("figures/main/allComponents_narrative_intPolicy_country.pdf"),
+  width=8, height=8.5,
+  plot=combined_patchwork
+)
+
+```
 
 
 ## Supporting plots for deeper investigation

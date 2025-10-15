@@ -39,6 +39,18 @@ factor_aes <- readxl::read_excel(here::here("R/mitigation_factor_aesthetics.xlsx
 typeAES <- factor_aes[which(factor_aes$variable == "oro_type"),]
 typeAES <- typeAES[order(typeAES$order),]
 
+continent_levels <- c("Americas","Asia","Europe","Oceania","Africa")
+
+## For parsing countries
+countries_ls <- data.frame(name_en = countrycode::codelist$country.name.en) %>%
+  mutate(country_iso = countrycode::countrycode(sourcevar   = name_en,
+                                       origin      = "country.name",
+                                       destination = "iso3c"),
+         country=name_en)
+
+
+
+source(here::here("R", "functions_to_format.R"))
 
 ```
 
@@ -142,6 +154,105 @@ all_Pub <- predOroType %>%
 save(pubs, file = here::here("data", "derived-data", "mitigationORO_pubs.RData"))
 save(all_Pub, file = here::here("data", "derived-data", "mitigationORO_pubs_allMitigationOROs.RData"))
 ```
+
+```{r publications by country}
+
+# get id and year metadata
+require(RSQLite)
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+uniquerefs <- tbl(p1_db, "uniquerefs_update2025") %>%
+  select(analysis_id, year, affiliation) 
+
+predOroTypeCountry <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+  left_join(uniquerefs, by = "analysis_id") %>%
+  collect()
+
+dbDisconnect(p1_db)
+
+## Parse countries from author affiliations
+
+predOroTypeCountry <- predOroTypeCountry %>%
+  filter(!is.na(year), 0.5 <= mean_prediction)
+  
+# Extract countries from affiliations  
+predOroTypeCountry$countries <- extract_all_affiliation(
+  predOroTypeCountry$affiliation, countries_ls)
+
+# explode data frame so that its long form
+predOroTypeCountry <- predOroTypeCountry %>%
+  mutate(
+    country = str_split(countries, ",\\s*"),
+    country = map(country, ~ unique(str_trim(str_replace_all(.x, "^['\"]|['\"]$", ""))))
+  ) %>%
+  unnest(country) %>%
+  filter(!is.na(country), country != "") %>%
+  # add weighting 
+  group_by(analysis_id) %>%
+  mutate(
+    country_weight = 1/n(),
+    country_count = 1
+  )
+
+# how many relevant for each oro type x country?
+pubs_country <- predOroTypeCountry %>%
+  filter(!is.na(year), 0.5 <= mean_prediction) %>%
+  group_by(level, year, country) %>%
+  summarise(
+    y = sum(country_weight, na.rm=T)
+  )%>%
+  mutate(
+    component = "publications",
+    variable_name = "Publications (N)",
+    level = gsub("[.]","-", level),
+    year= as.numeric(year)
+  ) %>%
+  rename(oro_type = level)
+
+
+
+pubs_country$continent <- countrycode(sourcevar = pubs_country$country,
+                            origin = "country.name",
+                            destination = "continent")
+
+pubs_country <- pubs_country %>%
+  # filter(
+  #   continent %in% continent_levels
+  # )%>%
+  mutate(
+    country_simple = case_when(
+      grepl("United States", country) ~ country,
+      grepl("China", country) ~ country,
+      grepl("United Kingdom", country) ~ country,
+      grepl("Europe", continent) ~ continent,
+      TRUE ~ "Other"
+    ),
+    continent = factor(continent, levels = continent_levels),
+    country_simple = factor(
+      country_simple, 
+      levels = c("United Kingdom","Europe","United States","China","Other")
+    )
+  )
+
+
+## quick plot
+pubs_country %>%
+  group_by(country_simple, year)%>%
+  summarise(
+    y=sum(y)
+  )%>%
+  ggplot()+
+  geom_area(aes(x=year, y= y, fill=country_simple), position="stack")+
+  theme_minimal()
+
+
+## Save
+save(pubs_country, file = here::here("data", "derived-data", "mitigationORO_pubs_country.RData"))
+
+```
+
 
 ```{r Load in number of O&C publications to calculate proportion?}
 ## Load in tabulated number of publications from previous chunk
@@ -349,6 +460,100 @@ save(polDat, file = here::here("data", "derived-data", "n_nonBindPolicy_docs.RDa
 save(all_polDat, file = here::here("data", "derived-data", "n_nonBindPolicy_docs_allMitigationOROs.RData"))
 ```
 
+```{r legislation and policy by country}
+
+leg_pol_country <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
+  rename(country = Country_short, year=Year, oro_type = oroType) %>%
+  filter(1975 < year,
+         National.level == "True"
+         ) %>%
+  mutate(
+    oro_type = case_when(
+      oro_type == "M_MRE_general" ~ "MRE-General", ## Note to fix this later
+      oro_type == "M_MRE_ocean" ~ "MRE-Ocean",
+      oro_type == "M_MRE_located" ~ "MRE-Located",
+      oro_type == "M_MRE_bio" ~ "MRE-Bio",
+      oro_type == "M_Incr_eff" ~ "Efficiency",
+      oro_type == "M_CCS" ~ "CCS",
+      oro_type == "M_CDR_other" ~ "CDR-General",
+      oro_type == "M_CDR_bc" ~ "CDR-BC",
+      oro_type == "M_CDR_oae" ~ "CDR-OAE",
+      oro_type == "M_CDR_biopump" ~ "CDR-BioPump",
+      # oro_type == "M_CDR_cult" ~ "CDR-Cult",
+     
+      TRUE ~ "Other"
+    ),
+    component = ifelse(
+      Binding.legislation == "True", "legislation","non-binding policy"),
+    variable_name = ifelse(
+      Binding.legislation=="True", "Legislation (N)","Non-binding policy (N)")
+    ) %>%
+  filter(oro_type != "Other") %>%
+  # add weighting 
+  group_by(search_id, component) %>%
+  mutate(
+    country_weight = 1/n(),
+    country_count = 1
+  ) %>%
+  # tabulate -- how many relevant for each oro type x country?
+  group_by(oro_type, year, country, component, variable_name) %>%
+  summarise(
+    y = sum(country_weight)
+  ) 
+
+
+
+
+leg_pol_country$continent <- countrycode(sourcevar = leg_pol_country$country,
+                            origin = "country.name",
+                            destination = "continent")
+leg_pol_country$continent[leg_pol_country$country=="European Union"] <- "Europe"
+leg_pol_country$continent[is.na(leg_pol_country$continent)] <- "Not found"
+
+
+leg_pol_country <- leg_pol_country %>%
+  mutate(
+    country_simple = case_when(
+      grepl("United States", country, ignore.case=T) ~ country,
+      grepl("China", country, ignore.case=T) ~ country,
+      grepl("United Kingdom", country, ignore.case=T) ~ country,
+      grepl("Europe", continent, ignore.case=T) ~ continent,
+      TRUE ~ "Other"
+    ),
+    continent = factor(continent, levels = c(continent_levels,"Not found")),
+    country_simple = factor(
+      country_simple, 
+      levels = c("United Kingdom","Europe","United States","China","Other")
+    )
+  )
+
+
+## quick plot
+leg_pol_country %>%
+  group_by(country_simple, year, component)%>%
+  summarise(
+    y=sum(y)
+  )%>%
+  ggplot()+
+  facet_wrap(vars(component))+
+  geom_area(aes(x=year, y= y, fill=country_simple), position="stack")+
+  theme_minimal()
+
+leg_pol_country %>%
+  group_by(continent, year)%>%
+  summarise(
+    y=sum(y)
+  )%>%
+  ggplot()+
+  geom_area(aes(x=year, y= y, fill=continent), position="stack")+
+  theme_minimal()
+
+
+## Save
+save(leg_pol_country, file = here::here("data", "derived-data", "n_policy_leg_country.RData"))
+
+```
+
 
 ## N deployments
 
@@ -425,6 +630,80 @@ ggplot(MreDat, aes(x=year, y=y, fill=oro_type))+
 ```
 
 
+
+```{r MRE deployment - Installed capacity - by country}
+## load data
+# Data source: IRENA renewable electricity statistics (https://www.irena.org/Publications/2024/Jul/Renewable-energy-statistics-2024)
+
+MreDat_country <- readxl::read_excel(here::here("data/raw-data/external/IRENA-electricity-statistics-by-country-year-2024.xlsx"),
+                         sheet = "Country") %>% 
+  filter(
+    Technology %in% c("Marine energy","Offshore wind energy")
+  ) %>% 
+  mutate(
+    oro_type = case_when(
+      Technology == "Marine energy" ~ "MRE-Ocean",
+      Technology == "Offshore wind energy" ~ "MRE-Located"
+    )
+  ) %>%
+  rename(year = Year, country = Country)  %>%
+  group_by(year,oro_type, country) %>% 
+  summarise(y = sum(`Electricity Installed Capacity (MW)`, na.rm=T)) %>%
+  # add identification columns
+  mutate(
+    year = as.numeric(year),
+    component = "deployment",
+    variable_name = "Electricity Installed Capacity (MW)"
+    
+  )
+
+
+# Parse country names
+MreDat_country$country <- countrycode(sourcevar = MreDat_country$country,
+                            origin = "country.name",
+                            destination = "country.name")
+
+MreDat_country$continent <- countrycode(sourcevar = MreDat_country$country,
+                            origin = "country.name",
+                            destination = "continent")
+
+
+MreDat_country$continent[is.na(MreDat_country$continent)] <- "Not found"
+
+
+MreDat_country <- MreDat_country %>%
+  mutate(
+    country_simple = case_when(
+      grepl("United States", country, ignore.case=T) ~ country,
+      grepl("China", country, ignore.case=T) ~ "China",
+      grepl("United Kingdom", country, ignore.case=T) ~ country,
+      grepl("Europe", continent, ignore.case=T) ~ continent,
+      TRUE ~ "Other"
+    ),
+    continent = factor(continent, levels = c(continent_levels,"Not found")),
+    country_simple = factor(
+      country_simple, 
+      levels = c("United Kingdom","Europe","United States","China","Other")
+    )
+  )
+
+
+
+
+## quick plot
+MreDat_country %>%
+  group_by(country_simple, year)%>%
+  summarise(
+    y=sum(y)
+  )%>%
+  ggplot()+
+  geom_area(aes(x=year, y= y, fill=country_simple), position="stack")+
+  theme_minimal()
+
+
+```
+
+
 ```{r Increase efficiency - domestic freight energy efficiency}
 # IEA domestic freight transport energy efficiency (gCO2/tkm)
 # https://www.iea.org/data-and-statistics/data-product/energy-efficiency-indicators
@@ -448,6 +727,8 @@ ggplot(eff, aes(x=year, y=y, fill=oro_type))+
 
 ```
 
+**note no country level data for incr. efficiency*
+
 For CCS download from [oil and gas climate initiative](https://www.ogci.com/ccus/co2-storage-catalogue). Choose to sum the variable of Storage Capacity: Those quantities of Total Storage Resources anticipated to be commercially accessible in the characterized geologic formation by application of development projects from a given date forward under defined conditions. Commercial Storage Resources must further satisfy four criteria: The target geologic formation must be discovered and characterized (including containment); it must be possible to inject at the required rates; the development project must be commercial; and the storage resource must remain, as of the evaluation date (i.e., not previously used for storage), on the development project(s) applied (https://www.ogci.com/ccus/co2-storage-catalogue/co2-storage-catalogue-about-the-catalogue) -- but only if associated with a project 
 
 ```{r CCS}
@@ -470,6 +751,73 @@ ccsDat <- readxl::read_excel(here::here("data/raw-data/external/CRSC_CYCLE_4_FIN
 
 ggplot(ccsDat, aes(year, y))+
   geom_col()
+
+```
+
+
+```{r CCS - country}
+
+
+ccsDat_country <- readxl::read_excel(here::here("data/raw-data/external/CRSC_CYCLE_4_FINAL_2024_160724.xlsx")) %>%
+  filter(grepl("shore|sea", area, ignore.case=T), !is.na(year_of_publication)) %>%
+  filter(project_spec == "YES") %>%
+  rename(year = year_of_publication) %>%
+  group_by(year, country) %>%
+  summarise(
+    y = sum(sum_low, sum_mid, sum_high, na.rm=T) #sum(stored_low, stored_mid, stored_high, na.rm=T)
+  ) %>%
+  mutate(
+    year = as.numeric(year),
+    variable_name = "Storage capacity (Mt)",
+    component = "deployment",
+    oro_type = "CCS"
+  )
+
+
+
+
+# Parse country names
+ccsDat_country$country <- countrycode(sourcevar = ccsDat_country$country,
+                            origin = "country.name",
+                            destination = "country.name")
+
+ccsDat_country$continent <- countrycode(sourcevar = ccsDat_country$country,
+                            origin = "country.name",
+                            destination = "continent")
+
+
+ccsDat_country$continent[is.na(ccsDat_country$continent)] <- "Not found"
+
+
+ccsDat_country <- ccsDat_country %>%
+  mutate(
+    country_simple = case_when(
+      grepl("United States", country, ignore.case=T) ~ country,
+      grepl("China", country, ignore.case=T) ~ "China",
+      grepl("United Kingdom", country, ignore.case=T) ~ country,
+      grepl("Europe", continent, ignore.case=T) ~ continent,
+      TRUE ~ "Other"
+    ),
+    continent = factor(continent, levels = c(continent_levels,"Not found")),
+    country_simple = factor(
+      country_simple, 
+      levels = c("United Kingdom","Europe","United States","China","Other")
+    )
+  )
+
+
+
+
+## quick plot
+ccsDat_country %>%
+  group_by(country_simple, year)%>%
+  summarise(
+    y=sum(y)
+  )%>%
+  ggplot()+
+  geom_area(aes(x=year, y= y, fill=country_simple), position="stack")+
+  theme_minimal()
+
 
 ```
 
@@ -502,6 +850,96 @@ head(bc_restoration)
 ggplot(bc_restoration, aes(x=year, y=y))+
   geom_col()
 ```
+
+
+```{r CDR-BC - country}
+bc_restoration_country <- readxl::read_excel(here::here("data/raw-data/external/Duarte2020RestorationDataSet-1.xlsx"),
+                                     sheet = "Data")%>%
+  filter(Habitat %in% c("Mangrove","Saltmarshes","Seagrass meadows")) %>% # Omit Oyster Reefs and Coral Reefs
+  # Sum the number of projects /year
+  mutate(year = as.numeric(Year)) %>%
+  mutate(
+    project_id = row_number()
+  )
+
+
+
+# parse country
+bc_restoration_country$countries <- extract_all_affiliation(bc_restoration_country$Location, countries_ls)
+
+
+# explode data frame so that its long form
+bc_restoration_country <- bc_restoration_country %>%
+  mutate(
+    country = str_split(countries, ",\\s*"),
+    country = map(country, ~ unique(str_trim(str_replace_all(.x, "^['\"]|['\"]$", ""))))
+  ) %>%
+  unnest(country) %>%
+  filter(!is.na(country), country != "") %>%
+  # add weighting 
+  group_by(project_id) %>%
+  mutate(
+    country_weight = 1/n(),
+    country_count = 1
+  )
+
+# Tabulate
+bc_restoration_country <- bc_restoration_country %>%
+  group_by(year, country) %>%
+  summarise(
+    y = sum(country_weight)
+  ) %>%
+  ungroup() %>% 
+  mutate(
+    variable_name = "BC restoration projects (N)",
+    component = "deployment",
+    oro_type = "CDR-BC"
+  )
+
+
+
+# Get continent
+bc_restoration_country$continent <- countrycode(sourcevar = bc_restoration_country$country,
+                            origin = "country.name",
+                            destination = "continent")
+
+
+bc_restoration_country$continent[is.na(bc_restoration_country$continent)] <- "Not found"
+
+
+bc_restoration_country <- bc_restoration_country %>%
+  mutate(
+    country_simple = case_when(
+      grepl("United States", country, ignore.case=T) ~ country,
+      grepl("China", country, ignore.case=T) ~ "China",
+      grepl("United Kingdom", country, ignore.case=T) ~ country,
+      grepl("Europe", continent, ignore.case=T) ~ continent,
+      TRUE ~ "Other"
+    ),
+    continent = factor(continent, levels = c(continent_levels,"Not found")),
+    country_simple = factor(
+      country_simple, 
+      levels = c("United Kingdom","Europe","United States","China","Other")
+    )
+  )
+
+
+
+
+## quick plot
+bc_restoration_country %>%
+  group_by(country_simple, year)%>%
+  summarise(
+    y=sum(y)
+  )%>%
+  ggplot()+
+  geom_area(aes(x=year, y= y, fill=country_simple), position="stack")+
+  theme_minimal()
+
+
+
+```
+
 
 Other CDR not available at country level. 
 Make proportional to amount of available habitat area? https://essd.copernicus.org/articles/16/3433/2024/#&gid=1&pid=1 -- van Zelst et al 2022
@@ -634,6 +1072,157 @@ ggplot(mCDRDeploy, aes(year, y, fill=oro_type))+
 
 ```
 
+```{r CDR-OAE CDR-BioPump -- country}
+library(MazamaSpatialUtils)
+
+# Ocean visions field trials 
+fieldTrials_country <- readxl::read_excel(
+  here::here("data/raw-data/external/Ocean-visions-mCDR-field-trial-database.xlsx"),
+  sheet = "Data") %>%
+  mutate(
+    `Start of Pilot` = replace(`Start of Pilot`, `Start of Pilot` %in% c("5.12.2023","2023"), as.numeric(as.Date("2023-01-01"))),
+    trialID = row_number()
+  ) %>%
+  mutate(year = as.Date(as.numeric(`Start of Pilot`), origin = "1899-12-30")) %>%
+  mutate(year = ifelse(year == as.Date("1952-12-30"), as.Date("2023-01-01"), year)) %>%
+  mutate(year = as.Date(year, origin = as.Date("1970-01-01"))) %>%
+  separate_rows(`All CDR Methods`, sep=",") %>% 
+  mutate(
+    oro_type = case_when(
+      grepl("OAE|Alkalinity|Weathering", `All CDR Methods`) ~ "CDR-OAE",
+      grepl("Upwelling", `All CDR Methods`) ~ "CDR-BioPump",
+      TRUE ~ "Other"
+    ),
+    year = as.numeric(format(year, "%Y")),
+    source = "Field trial"
+  ) %>%
+  filter(!is.na(year) & oro_type != "Other") 
+
+# Get country and continent from coordinates
+fieldTrials_country$country <- getCountry(fieldTrials_country$longitude,fieldTrials_country$Latitude)
+fieldTrials_country$continent <- countrycode(
+  fieldTrials_country$country, origin = "country.name", destination = "continent"
+)
+
+
+# Founding year of mcdr startups
+# Need to de-duplicate and add year  
+
+GESAMP_companies_country <- readxl::read_excel(
+  here::here("data/raw-data/external/GESAMP_wg41_ocean_climate_intervention_projects_31_may_2024.xlsx"), sheet="AllTables") %>%
+  select(Company, Type, Website) %>%
+  mutate(
+    Company = trimws(gsub("[[:punct:]]", "", Company)),
+    source = "GESAMP WG 41"
+  )%>%
+  filter(!is.na(Company))%>%
+  mutate(
+    country = NA,
+    continent = NA
+  )
+
+# Load in OceanNET companies and de-deuplicate from GESAMP companies
+OceanNET_companies_country <- read.csv(
+  here::here("data/raw-data/external/OceanNETs_D18_oceanbased_CDR_companies/dataset/D1_8_database_oceanbased_companies.csv")) %>%
+  mutate(
+    Company = trimws(gsub("[[:punct:]]", "", Company)),
+    source = "OceanNETs (2020) D1.8 database"
+  )%>%
+  filter(!is.na(Company), !is.na(Lat))%>%
+  select(-c(contains("X"))) %>%
+  filter(!(tolower(Company) %in% tolower(GESAMP_companies_country$Company)), Company != "Qilibrium")
+
+# Get country and continent from coordinates
+OceanNET_companies_country$country <- getCountry(OceanNET_companies_country$Long,OceanNET_companies_country$Lat)
+OceanNET_companies_country$continent <- countrycode(
+  OceanNET_companies_country$country, origin = "country.name", destination = "continent"
+) 
+
+
+
+## read in the years
+mCDRCompanies_country <- readxl::read_excel(here::here("data/raw-data/mCDR-companies-linkedin.xlsx")) %>%
+  filter(!is.na(`Company founded on (linkedin)`)) %>%
+  rename(year = `Company founded on (linkedin)`, company_country = `Company country (linkedin)`) %>%
+  mutate(
+    company_country = countrycode(company_country, origin="iso2c",
+                                  destination = "country.name")
+  )%>%
+  select(Company, year, company_country) %>%
+  left_join(GESAMP_companies_country %>% select(Company, Type, country), by="Company") %>%
+  left_join(OceanNET_companies_country %>% select(Company, Type, country), by="Company") %>%
+  mutate(
+    country = case_when(
+      !is.na(country.x)~country.x,
+      !is.na(country.y)~country.y,
+      TRUE~company_country
+    ),
+    country = countrycode(country, origin = "country.name",destination = "country.name"),
+    continent = countrycode(country, origin = "country.name",destination = "continent"),
+    Type = ifelse(is.na(Type.x), Type.y, Type.x)
+  ) %>%
+  select(Company, Type, year, country, continent) %>%
+  mutate(
+    oro_type = case_when(
+      grepl("Upwell|fertilization", Type, ignore.case=TRUE) ~ "CDR-BioPump",
+      # grepl("Biomass sinking|Farming|Harvesting|Aquaculture", Type, ignore.case=TRUE) ~ "CDR-Cult",
+      grepl("OAE|Alkalinity|weathering", Type) ~ "CDR-OAE",
+      TRUE~"CDR-Other"
+    ),
+    source = "Startup",
+    year = as.numeric(year)
+  ) %>%
+  filter(oro_type != "CDR-Other")
+  
+# Ocean visions community and www.cdr.fyi/leaderboards can't be scraped because they use private APIs
+# Although the latter a list of suppliers can be found here without metadata
+# https://www.cdr.fyi/api/search
+
+
+
+
+## Combine data sources
+mCDRDeploy_country <- fieldTrials_country[,c("oro_type","year","source","country","continent")] %>%
+  bind_rows(mCDRCompanies_country[,c("oro_type","year","source","country","continent")]) %>%
+  group_by(oro_type, year, country, continent) %>%
+  summarise(
+    y=n()
+  ) %>%
+  mutate(
+    variable_name = "Field trial/startup company (N)",
+    component = "deployment",
+    continent = ifelse(is.na(continent), "Not found", continent),
+    country_simple = case_when(
+      grepl("United States", country, ignore.case=T) ~ country,
+      grepl("China", country, ignore.case=T) ~ "China",
+      grepl("United Kingdom", country, ignore.case=T) ~ country,
+      grepl("Europe", continent, ignore.case=T) ~ continent,
+      TRUE ~ "Other"
+    ),
+    # factor
+    continent = factor(continent, levels = c(continent_levels,"Not found")),
+    country_simple = factor(
+      country_simple, 
+      levels = c("United Kingdom","Europe","United States","China","Other")
+    )
+  )
+
+
+
+
+## quick plot
+mCDRDeploy_country %>%
+  group_by(country_simple, year, oro_type)%>%
+  summarise(
+    y=sum(y)
+  )%>%
+  ggplot()+
+  geom_area(aes(x=year, y= y, fill=country_simple), position="stack")+
+  facet_wrap(vars(oro_type))+
+  theme_minimal()
+
+
+```
 
 
 
@@ -667,9 +1256,55 @@ save(allDeployDat, file=here::here("data/derived-data/mitigationDeployDat.RData"
 ```
 
 
+```{r save all deployment data by country, eval=FALSE}
+cols <- c("component","oro_type","year", 
+          "country", "country_simple","continent",
+          "variable_name","y")
+
+eff_country <- eff %>%
+  mutate(
+    country = NA,
+    country_simple = NA,
+    continent = NA
+  )
+
+allDeployDat_country <- rbind(
+  MreDat_country[,cols],
+  eff_country[,cols],
+  ccsDat_country[,cols],
+  bc_restoration_country[,cols],
+  mCDRDeploy_country[,cols]
+)
+
+
+
+
+allDeployDat_country %>%
+  group_by(variable_name, oro_type, country_simple, year)%>%
+  summarise(
+    y=sum(y)
+  )%>%
+  ggplot(aes(year, y, fill=country_simple, col=country_simple))+
+  geom_area(position = "stack")+
+  geom_line()+
+  facet_wrap(vars(oro_type), scales="free")+
+  geom_text(aes(label = str_wrap(variable_name, 25)), x=-Inf, y=Inf, check_overlap = T, guide=FALSE, vjust=1, hjust=0, size=3)+
+  labs(x = "Year", y="Action metric")+
+  theme_bw()
+  # theme(
+  #   legend.position = "none"
+  # )
+
+
+
+save(allDeployDat_country, file=here::here("data/derived-data/mitigationDeployDat_country.RData"))
+
+```
+
+
 # N Posts
 
-```{r}
+```{r summarise posts and save}
 # before i was using n_posts_like_weighted instead of n_posts_weighted (qry + like)
 
 postsDat <- read.csv(here::here("outputs/sentiment_predictions/sentiment_summary_oro_year.csv"))%>%
@@ -734,7 +1369,7 @@ save(postsDat, file=here::here("data/derived-data/mitigationPostsDat.RData"))
 ```
 
 
-```{r}
+```{r calculate summary for all mitigation OROs}
 
 all_postsDat <- read.csv(here::here("outputs/sentiment_predictions/sentiment_allCompiled_quantCols.csv")) %>%
   distinct(post_id, .keep_all = TRUE) %>%
