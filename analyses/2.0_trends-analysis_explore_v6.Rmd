@@ -950,7 +950,7 @@ Visualize the aggregated meta-network where:
 * Edge transparency = consistency (e.g. normalized N significant).
 * Edge color = sign of correlation
 
-```{r group oro networks conceptually and plot combined networks}
+```{r remove - group oro networks conceptually and plot combined networks}
 require(ggraph)
 require(tidygraph)
 
@@ -1160,6 +1160,240 @@ final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2))
 ggsave(filename=here::here("figures/main/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
 
 ```
+
+
+Visualize the aggregated meta-network where:
+
+* Edge transparency = mean TE ratio.
+* Edge color = sign of correlation
+
+```{r v2 group oro networks conceptually and plot combined networks - simplified for clearer arrows}
+require(ggraph)
+require(tidygraph)
+
+
+
+## Get diagraph objects for each defined cluster
+# Create a data.frame for lookup
+concept_cluster_df <- data.frame(
+  oro_type = c(
+    "CCS",
+    "CDR-BC","CDR-BioPump","CDR-OAE",
+    "Efficiency",
+    "MRE-Bio","MRE-Located", "MRE-Ocean"
+  ),
+  cluster = c(1,rep(2,3),3,rep(4,3))
+)
+
+n_clusters <- length(unique(concept_cluster_df$cluster))
+
+# List to hold one meta-graph per cluster
+concept_meta_graphs <- vector("list", n_clusters)
+concept_cluster_names <- vector("list", n_clusters)
+
+for (k in 1:n_clusters) {
+  # Get oro_types in this cluster
+  types_in_cluster <- concept_cluster_df %>%
+    filter(cluster == k) %>%
+    pull(oro_type)
+  
+  # Filter TE results for these oro_types and significant edges
+  cluster_te <- TE_results %>%
+    filter(oro_type %in% types_in_cluster, 
+           NodeX %in% selectedComponents,
+           NodeY %in% selectedComponents,
+           TE_pval <= 0.05,
+           !is.na(TE_ratio),
+           0 < TE_ratio
+           )
+  cluster_te$TE_ratio[cluster_te$TE_ratio==Inf] <- max(cluster_te$TE_ratio[is.finite(cluster_te$TE_ratio)])
+  
+  # Aggregate TE_ratio per NodeX → NodeY pair
+  edge_summary <- cluster_te %>%
+    ungroup()%>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      n_sig = n(),
+      avg_ratio = mean(TE_ratio, na.rm = TRUE),
+      avg_correlation = mean(optCor, na.rm=T),
+      med_correlation = quantile(optCor, na.rm=T, probs = 0.5),
+      avg_delay = mean(optDelay, na.rm=T),
+      sign = ifelse(avg_correlation >= 0, 1, -1),
+      oro_types = paste(unique(oro_type), collapse = ", "), 
+      .groups="drop"
+    )%>%
+    mutate(
+      relative_nsig = n_sig / max(n_sig, na.rm=T)
+    )
+  
+  # Build igraph object
+  g <- graph_from_data_frame(edge_summary, directed = TRUE)
+  
+  # Set edge weights and labels
+  # E(g)$weight <- edge_summary$avg_ratio
+  # E(g)$width <- log1p(E(g)$weight) * 1.5
+  # E(g)$color <- scales::alpha(ifelse(E(g)$avg_correlation >= 0, "#4dac26", "#d01c8b"),edge_summary$relative_nsig)
+  ## weight is avg ratio scaled from 0 to 1
+  E(g)$weight <- scales::rescale(
+      edge_summary$avg_ratio,
+      to=c(0.25,1),
+      from = range(TE_results$TE_ratio[
+        TE_results$oro_type %in% concept_cluster_df$oro_type &
+          !is.na(TE_results$TE_ratio) &
+          is.finite(TE_results$TE_ratio)
+      ])
+      )
+  E(g)$width <- 2
+  E(g)$color <- scales::alpha(
+    ifelse(E(g)$avg_correlation >= 0, "#4dac26", "#d01c8b"),
+    E(g)$weight
+    )
+  E(g)$sign <- edge_summary$sign
+
+  
+  concept_meta_graphs[[k]] <- g
+  concept_cluster_names[[k]] <- paste(typeAES$label[match(types_in_cluster, typeAES$level)], collapse = ", ")
+}
+
+
+
+
+
+
+## Plot the networks of the oro types
+nodeTextSize <- 3.5
+titleSize <- 12
+
+
+
+# Convert network to ggplot
+source(here::here("R/compute_negative_edge_dots.R"))
+
+plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, end_cap_mult_factor=4) {
+  
+  # maybe plot separately by positive and negative so I can make arrows and dots?
+  g_tidy <- as_tbl_graph(g) 
+  
+  # Code for plotting dots at end of negative effects
+  # --- Create layout (needed to access node positions) ---
+  graph_layout <- create_layout(g_tidy, layout = "circle")
+  
+  # --- Extract negative edge targets ---
+  neg_edges <- g_tidy %>%
+    activate(edges) %>%
+    filter(sign == -1) %>%  # Filter for negative edges
+    as_tibble() %>%
+    mutate(
+      from_name = V(g_tidy)$name[from],
+      to_name = V(g_tidy)$name[to]
+    )
+  
+  # Get positions of source and target nodes for negative edges
+  edge_positions <- graph_layout %>%
+    filter(name %in% c(neg_edges$from_name, neg_edges$to_name))
+  
+  dot_positions <- compute_negative_edge_dots(g, layout = "circle", end_cap_mm, end_cap_mult_factor)
+
+  
+  ## plot
+  ggraph(g_tidy, layout = "circle") +  # You can try "kk" or "circle" or "fr" for spacing
+    
+    # # --- Positive edges with arrows ---
+    geom_edge_fan(
+      aes(
+        edge_width = width,
+        edge_alpha = weight,
+        label = paste0("lag = ", scales::number(avg_delay, accuracy = 1), ", ", oro_types),
+        edge_color = color,
+        filter = sign==1
+      ),
+      arrow = arrow(length = unit(7, 'mm')),
+      end_cap = circle(end_cap_mm, 'mm'),
+      label_dodge = unit(2, 'mm'),
+      label_push = unit(2, 'mm'),
+      angle_calc = 'along',
+      label_size=2.75,
+      show.legend = FALSE
+    ) +
+  
+    # --- Negative edges with dot ends (no arrow) ---
+    geom_edge_fan(
+      aes(
+        edge_width = width,  # abs for width scaling
+        edge_alpha = weight,
+        label = paste0("lag = ", scales::number(avg_delay, accuracy = 1), ", ", oro_types),
+        edge_color = color,
+        filter = sign==-1
+      ),
+      end_cap = circle(end_cap_mm, 'mm'),  # no arrow
+      lineend = "round",   
+      label_dodge = unit(2, 'mm'),
+      label_push = unit(2, 'mm'),
+      angle_calc = 'along',
+      label_size=2.75,
+      show.legend = FALSE
+    ) +
+    
+    # --- Draw a point (dot) at target node of negative edges ---
+    geom_point(
+      data = dot_positions,
+      aes(x = dot_x, y = dot_y, size = 4*width, alpha = weight),
+      shape = 21,             
+      fill = "#d01c8b",
+      color="transparent",
+      show.legend = FALSE
+    ) +
+    scale_size_identity()+
+    
+    # Plot nodes
+    # geom_node_point(size = 6, aes(color = name)) +
+    
+    scale_color_manual(values = componentAES$colour,
+                       breaks = componentAES$level, 
+                       guide="none")+
+    scale_fill_manual(values = componentAES$colour,
+                       breaks = componentAES$level, 
+                       guide="none")+
+    scale_edge_color_identity()+
+    scale_alpha_identity()+
+    scale_edge_alpha_identity()+
+    scale_edge_width_identity()+
+    scale_x_continuous(expand = expansion(mult=0.1))+
+    scale_y_continuous(expand = expansion(mult=0.1))+
+
+    geom_node_label(aes(label = componentAES$label[match(name, componentAES$level)], fill = name), #repel = TRUE,
+                   label.size = nodeTextSize, alpha=0.8
+                   ) +
+
+    labs(title = paste(cluster_label), tag = letters[cluster_id]) +
+    theme_void() +
+    theme(
+      plot.title = element_text(size = titleSize, hjust = 0.5),
+      plot.margin = unit(c(5,5,5,5), units = "mm"),
+      legend.position = "none"
+      )
+}
+
+cluster_order <- 1:n_clusters
+concept_cluster_names2 <- list(
+  "CCS","mCDR","Efficiency","MRE"
+)
+concept_ggraph_plots <- lapply(cluster_order, function(k) {
+  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], end_cap_mm = 10, end_cap_mult_factor=1.8)
+})
+
+
+
+# Arrange the ggraph plots horizontally according to cluster number
+final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2))
+
+
+# Show or save
+ggsave(filename=here::here("figures/main/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
+
+```
+
+
 
 ```{r plot just efficiency network for method figure}
 ggsave(
