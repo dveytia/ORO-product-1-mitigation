@@ -2718,6 +2718,66 @@ allComponentDat_model_country <- pubs_country %>%
   )
 
 
+# Calculate overall proportions for country groups
+maxy <- allComponentDat_model_country %>%
+  group_by(component, variable_name)%>%
+  summarise(
+    total = sum(y, na.rm=T)
+  )
+  
+allCountrySums <- allComponentDat_model_country %>%
+  filter(component %in% selectedComponents, !is.na(country_simple)) %>%
+  group_by(component, variable_name, country_simple)%>%
+  summarise(
+    y_total=sum(y)
+  )%>%
+  ungroup()%>%
+  left_join(maxy, by=c("component","variable_name")) %>%
+  mutate(
+    y_percent = y_total/total*100
+  ) 
+  
+
+allCountrySums %>% filter(component %in% c("publications"), country_simple == "China")
+#   component    variable_name    country_simple y_total total y_percent
+#   <chr>        <chr>            <fct>            <dbl> <dbl>     <dbl>
+# 1 publications Publications (N) China            6454. 36410      17.7
+
+
+# Calculate overall proportions for country groups by ORO type
+maxy <- allComponentDat_model_country %>%
+  group_by(oro_type, component, variable_name)%>%
+  summarise(
+    total = sum(y, na.rm=T)
+  )
+allCountrySums <- allComponentDat_model_country %>%
+  filter(component %in% selectedComponents, !is.na(country_simple)) %>%
+  group_by(oro_type, component, variable_name, country_simple)%>%
+  summarise(
+    y_total=sum(y)
+  )%>%
+  ungroup()%>%
+  left_join(maxy, by=c("component","variable_name","oro_type")) %>%
+  mutate(
+    y_percent = y_total/total*100
+  ) 
+  
+
+allCountrySums %>% filter(component %in% c("publications"), country_simple == "China")
+#   oro_type    component    variable_name    country_simple y_total  total y_percent
+#   <chr>       <chr>        <chr>            <fct>            <dbl>  <dbl>     <dbl>
+# 1 CCS         publications Publications (N) China             87.5  1017.      8.60
+# 2 CDR-BC      publications Publications (N) China            217.   1263.     17.2 
+# 3 CDR-BioPump publications Publications (N) China             14.8   202       7.33
+# 4 CDR-OAE     publications Publications (N) China             13.2    93      14.2 
+# 5 Efficiency  publications Publications (N) China            485.   2308      21.0 
+# 6 MRE-Bio     publications Publications (N) China             24.9   274.      9.11
+# 7 MRE-Located publications Publications (N) China           2974.  13366.     22.3 
+# 8 MRE-Ocean   publications Publications (N) China           2638.  17888.     14.7
+
+
+
+## make panel plots ##
 savePlot = FALSE
 
 oro_groups <- list(
@@ -2727,8 +2787,8 @@ oro_groups <- list(
   "narrative" = c("MRE-Located", "CDR-OAE","Efficiency")
 )
 
-## View summary table of cutpoints
-View(cutpoint_results %>% filter(oro_type %in% oro_groups$narrative) %>% pivot_wider(id_cols = c(oro_type, cp_id, component, variable_name), names_from = quantile, values_from = year))
+# ## View summary table of cutpoints
+# View(cutpoint_results %>% filter(oro_type %in% oro_groups$narrative) %>% pivot_wider(id_cols = c(oro_type, cp_id, component, variable_name), names_from = quantile, values_from = year))
 
 
 ## Plot time series by group
@@ -2852,14 +2912,14 @@ for(og in which(names(oro_groups)=="narrative")){
       geom_rect(data = changePointsQuantiles %>%filter(quantile %in% c("2.5%","97.5%")) %>% pivot_wider(names_from = "quantile", values_from = year),
                aes(xmin=.data$`2.5%`, xmax=.data$`97.5%`),
                ymin=-Inf, ymax=Inf,
-               fill="darkgrey", alpha=0.5)+
+               fill="darkgrey", alpha=0.7)+
       geom_line(data = tmpDat, aes(x=year, y=y, color=component_color))+
       geom_rect(data = tmpDat_country, aes(xmin=year-0.5,xmax=year+0.5, ymin = ymin_stack, ymax = ymax_stack, fill=country_simple), alpha = 0.6) +
       scale_x_continuous(limits = year_lim)+
       scale_color_identity(guide="none")+
       scale_fill_manual(
         breaks = levels(tmpDat_country$country_simple),
-        values = c(RColorBrewer::brewer.pal(4, "Paired"),"grey70")
+        values = c(RColorBrewer::brewer.pal(4, "Paired"),"bisque2")
       )+
       facet_wrap(vars(component),ncol=1, scales = "free_y")+
       labs(
@@ -2950,6 +3010,9 @@ combined_patchwork <- wrap_plots(plotList,
                                  guides = "collect") +
     plot_annotation(tag_levels = 'a', tag_suffix = ")") &
   theme(legend.position = "bottom")
+
+
+combined_patchwork 
 
 ggsave(
   here::here("figures/main/allComponents_narrative_intPolicy_country.pdf"),
