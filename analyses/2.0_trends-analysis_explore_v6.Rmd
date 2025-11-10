@@ -2697,12 +2697,12 @@ tmpYlims <- c(min(intPolMoments$year_min), max(intPolMoments$year_max)+2)
 
 ggp_intPolMom <- ggplot()+
   geom_rect(data = intPolMoments,
-           aes(xmin=.data$year_min, xmax=.data$year_max),
+           aes(xmin=.data$year_min, xmax=.data$year_max, fill = .data$label),
            ymin = -Inf, ymax=Inf,
-           fill="lightpink")+
+           )+ #fill="lightpink"
   geom_vline(data = intPolMoments,
-           aes(xintercept=.data$year_min),
-           linewidth = 0.5, linetype = "solid", col="red")+
+           aes(xintercept=.data$year_min, col = .data$label),
+           linewidth = 0.5, linetype = "solid")+ #col="red"
   geom_text(data = intPolMoments %>%
               mutate(
                 y= rep(seq(0.1,0.7, length.out=3),ceiling(nrow(intPolMoments)/3))[1:nrow(intPolMoments)]
@@ -2842,7 +2842,7 @@ oro_groups <- list(
   "mCDR" = c("CDR-BioPump","CDR-BC","CDR-OAE"),
   "MRE" = c("MRE-Ocean","MRE-Located","MRE-Bio"),
   "Other"= c("CCS","Efficiency"),
-  "narrative" = c("MRE-Located", "CDR-OAE","Efficiency")
+  "narrative" = c("MRE-Located", "Efficiency","CDR-OAE")
 )
 
 # ## View summary table of cutpoints
@@ -3006,75 +3006,102 @@ for(og in which(names(oro_groups)=="narrative")){
 
 
 ## Plot with international policy moments as well
-intPolMoments <- readxl::read_excel(
-  here::here("data/raw-data/international_policy_moments.xlsx")
-)%>%
-  mutate(
-    year_min = as.numeric(year_min),
-    year_max = as.numeric(year_max),
-    component = "International policy"
-  )
+# intPolMoments <- readxl::read_excel(
+#   here::here("data/raw-data/international_policy_moments.xlsx")
+# )%>%
+#   mutate(
+#     year_min = as.numeric(year_min),
+#     year_max = as.numeric(year_max),
+#     component = "International policy"
+#   )
+# 
+# tmpYlims <- c(min(intPolMoments$year_min), max(intPolMoments$year_max)+2)
+# 
+# ggp_intPolMom <- ggplot()+
+#   geom_rect(data = intPolMoments,
+#            aes(xmin=.data$year_min, xmax=.data$year_max, fill = .data$label),
+#            ymin = -Inf, ymax=Inf, alpha=0.5
+#            )+ #fill="lightpink"
+#   geom_vline(data = intPolMoments,
+#            aes(xintercept=.data$year_min, col=.data$label),
+#            linewidth = 0.5, linetype = "solid")+ #col="red"
+#   geom_text(data = intPolMoments %>%
+#               mutate(
+#                 y= rep(seq(0.1,0.7, length.out=3),ceiling(nrow(intPolMoments)/3))[1:nrow(intPolMoments)]
+#               ),
+#            aes(x=.data$year_min, y=.data$y, label= stringr::str_wrap(.data$label, width=10)),
+#            angle=30, hjust=0, col="black", size=2, nudge_x = 0.2)+
+#   scale_x_continuous(limits = tmpYlims)+
+#   scale_y_continuous(limits = c(0,1))+
+#   labs(
+#     y="",
+#     x="Year"
+#   )+
+#   scale_color_discrete()+
+#   theme_minimal(base_size = 10)+
+#   coord_cartesian(clip="off")+
+#   theme(
+#     axis.text.y = element_blank(),
+#     axis.ticks.y = element_blank(),
+#     plot.margin = unit(c(0.1, 0.1,0.1,0.1), units = "cm"),
+#     legend.position = "none"
+#   )
+# 
+# ggp_intPolMom
 
-tmpYlims <- c(min(intPolMoments$year_min), max(intPolMoments$year_max)+2)
-
-ggp_intPolMom <- ggplot()+
-  geom_rect(data = intPolMoments,
-           aes(xmin=.data$year_min, xmax=.data$year_max),
-           ymin = -Inf, ymax=Inf,
-           fill="lightpink")+
-  geom_vline(data = intPolMoments,
-           aes(xintercept=.data$year_min),
-           linewidth = 0.5, linetype = "solid", col="red")+
-  geom_text(data = intPolMoments %>%
-              mutate(
-                y= rep(seq(0.1,0.7, length.out=3),ceiling(nrow(intPolMoments)/3))[1:nrow(intPolMoments)]
-              ),
-           aes(x=.data$year_min, y=.data$y, label= stringr::str_wrap(.data$label, width=10)),
-           angle=30, hjust=0, col="black", size=2, nudge_x = 0.2)+
-  scale_x_continuous(limits = tmpYlims)+
-  scale_y_continuous(limits = c(0,1))+
-  labs(
-    y="",
-    x="Year"
-  )+
-  theme_minimal(base_size = 10)+
-  coord_cartesian(clip="off")+
-  theme(
-    axis.text.y = element_blank(),
-    axis.ticks.y = element_blank(),
-    plot.margin = unit(c(0.1, 0.1,0.1,0.1), units = "cm")
-  )
-
-ggp_intPolMom
+## Or use infographic
+# Import slide
+slide_img <- image_read_pdf("figures/main/policy_moments_timeline/pol_mom_timeline.pdf", density = 600)
+slide_img <- image_trim(slide_img)
+slide_ras <- as.raster(slide_img)
+# plot(slide_ras)
+ggp_intPolMom <- rasterGrob(slide_ras, interpolate = FALSE)
 
 
+require(ggnewscale)
 
 plotList <- lapply(ggps_country[[which(names(oro_groups)=="narrative")]],
                    function(x){
-                     x+geom_vline(data = intPolMoments%>% select(year_min),
-                         aes(xintercept=.data$year_min),
-                         linewidth = 0.5, linetype = "solid", col="red")
+                     x+
+                       new_scale_color()+
+                       geom_vline(data = intPolMoments%>% select(year_min, label),
+                         aes(xintercept=.data$year_min, col=.data$label),
+                         linewidth = 0.5, linetype = "solid")+
+                       scale_color_discrete(guide="none")
                    })
+
+leg <- ggpubr::get_legend( plotList[[2]])
+
 plotList <- c(
   list(ggp_intPolMom),
   plotList
 )
 
+
+
 plotLayout <- "AAA
               BCD"
 
-combined_patchwork <- wrap_plots(plotList, 
-                                 design = plotLayout, heights=c(0.2,1),
+combined_patchwork0 <- wrap_plots(plotList, 
+                                 design = plotLayout, heights=c(0.35,1),
                                  guides = "collect") +
     plot_annotation(tag_levels = 'a', tag_suffix = ")") &
-  theme(legend.position = "bottom")
+  theme(legend.position = "none")
 
 
-combined_patchwork 
+
+leg_patch <- as_ggplot(leg) & theme(plot.tag = element_text(color="transparent"))
+
+
+
+combined_patchwork <- wrap_plots(combined_patchwork0, leg_patch, 
+                                 ncol=1, heights = c(2,0.15))+
+  plot_annotation(tag_levels = "a", tag_suffix=")")
+
 
 ggsave(
   here::here("figures/main/allComponents_narrative_intPolicy_country.pdf"),
-  width=8, height=8.5,
+  width=8, height=9,
   plot=combined_patchwork
 )
 
