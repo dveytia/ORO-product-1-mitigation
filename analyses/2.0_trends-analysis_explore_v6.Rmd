@@ -59,6 +59,9 @@ typeAES <- typeAES[order(typeAES$order),]
 componentAES <- factor_aes[which(factor_aes$variable == "component"),]
 componentAES <- componentAES[order(componentAES$order),]
 
+# actually make all components grey
+componentAES$colour <- paste("grey20")
+
 ## Set seed
 addTaskCallback(function(...) {set.seed(123);TRUE})
 
@@ -247,7 +250,10 @@ ggsave(
 
 # Import slide of conceptual model
 slide_img <- image_read_pdf("figures/main/conceptual_model/conceptual_model.pdf", density = 600)
-slide_grob <- rasterGrob(as.raster(slide_img), interpolate = FALSE)
+slide_img <- image_trim(slide_img)
+slide_ras <- as.raster(slide_img)
+# plot(slide_ras)
+slide_grob <- rasterGrob(slide_ras, interpolate = FALSE)
 
 
 
@@ -551,7 +557,7 @@ allDep_ggp
 
 ```
 
-```{r plot all dimension timeseries together in multipanel figure}
+```{r plot all dimension timeseries together in multipanel figure - legend on side}
 ## Plot only timeseries
 plotList <- list(
   year_component_ggp+
@@ -582,6 +588,50 @@ ggsave(
   plot = combined
 )
 ```
+
+
+```{r plot all dimension timeseries together in multipanel figure - legend on bottom}
+## Plot only timeseries
+oro_leg <- ggpubr::get_legend(year_component_prop_ggp)
+
+plotList <- list(
+  year_component_ggp+
+    ggtitle("a)")+
+    theme(legend.position = "none",
+          plot.margin = unit(rep(0.1, 4),"cm")
+          ),
+  year_component_prop_ggp+
+    ggtitle("b)")+
+    theme(legend.position = "none",
+          plot.margin = unit(rep(0.1, 4),"cm")
+          ),
+  oro_leg,
+  allDep_ggp+
+    ggtitle("c)")+
+    theme(plot.margin = unit(rep(0.1, 4),"cm"))
+)
+
+plotLay <-
+"ABD
+CCD"
+
+combined <- wrap_plots(plotList,
+                       design = plotLay,
+                       widths = c(1,1,2.3),
+                       heights = c(6,1)
+                       )
+  # plot_annotation(tag_levels = "a", tag_suffix = ")")
+
+
+## Save
+ggsave(
+  here::here("figures/main/distribution_by_component_alltimeseries_plots.pdf"),
+  width=12, height=7,
+  plot = combined
+)
+```
+
+
 
 ```{r, out.width="0.9\\linewidth", include=TRUE, fig.align="center", fig.cap=c("ORO-specific action metrics"), echo=FALSE}
 
@@ -1108,7 +1158,8 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
     # --- Draw a point (dot) at target node of negative edges ---
     geom_point(
       data = dot_positions,
-      aes(x = dot_x, y = dot_y, size = 2*log1p(weight),alpha = relative_nsig),
+      aes(x = dot_x, y = dot_y, size = 8*weight, #6*log1p(weight),
+          alpha = relative_nsig),
       shape = 21,             
       fill = "#d01c8b",
       color="transparent",
@@ -1130,7 +1181,7 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
     scale_y_continuous(expand = expansion(mult=0.1))+
 
     geom_node_label(aes(label = componentAES$label[match(name, componentAES$level)], fill = name), #repel = TRUE,
-                   label.size = nodeTextSize, alpha=0.8
+                   label.size = nodeTextSize, alpha=0.8, color = "white"
                    ) +
 
     labs(title = paste(cluster_label), tag = letters[cluster_id]) +
@@ -1261,9 +1312,9 @@ for (k in 1:n_clusters) {
 
 
 ## Plot the networks of the oro types
-nodeTextSize <- 3.5
-titleSize <- 12
-
+nodeTextSize <- 4 #3.5
+titleSize <- 14 #12
+labelSize <- 2.75
 
 
 # Convert network to ggplot
@@ -1312,7 +1363,7 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
       label_dodge = unit(2, 'mm'),
       label_push = unit(2, 'mm'),
       angle_calc = 'along',
-      label_size=2.75,
+      label_size=labelSize,
       show.legend = FALSE
     ) +
   
@@ -1330,7 +1381,7 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
       label_dodge = unit(2, 'mm'),
       label_push = unit(2, 'mm'),
       angle_calc = 'along',
-      label_size=2.75,
+      label_size=labelSize,
       show.legend = FALSE
     ) +
     
@@ -1362,7 +1413,8 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
     scale_y_continuous(expand = expansion(mult=0.1))+
 
     geom_node_label(aes(label = componentAES$label[match(name, componentAES$level)], fill = name), #repel = TRUE,
-                   label.size = nodeTextSize, alpha=0.8
+                   label.size = nodeTextSize, alpha=0.8,
+                   color = "white"
                    ) +
 
     labs(title = paste(cluster_label), tag = letters[cluster_id]) +
@@ -1407,6 +1459,8 @@ ggsave(
 
 
 ```{r for mCDR and MRE and Efficiency calculate node importance and influence}
+networkBaseSize <- 16
+
 plot_network_metrics <- function(network_graph){
   # causal influencers - legislation, policy
   influencers <- degree(network_graph, mode = "out") %>% 
@@ -1481,7 +1535,7 @@ plot_network_metrics <- function(network_graph){
       y="Network metric",
       fill = "Metric\n(scaled)"
     )+
-    theme_minimal(base_size = 12)+
+    theme_minimal(base_size = networkBaseSize)+
     theme(
       axis.text.x = element_text(angle = 45, hjust=1)
       # legend.position = "bottom"
@@ -1504,6 +1558,7 @@ source(here::here("R/extend.vector"))
 source(here::here("R/my.QPress.R"))
 addTaskCallback(function(...) {set.seed(123);TRUE})
 
+qnmBaseSize <- 12
 
 
 # Function to run press perturbation with timeout if it freezes
@@ -1648,7 +1703,7 @@ plot_QNM <- function(k, nSims = 5000, weightSimulation = FALSE, uncertainThresho
       geom_col(aes(y=-Negative), fill = "#d01c8b")+
       
       geom_text(aes(y=Positive, label = Positive), vjust=0)+
-      geom_text(aes(y=-Negative, label = Negative), vjust=1)+
+      geom_text(aes(y=-Negative, label = paste0("-",Negative)), vjust=1)+
       
       geom_hline(yintercept=0, col="red")+
       # scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=5, colours = viridis(5))+
@@ -1662,7 +1717,7 @@ plot_QNM <- function(k, nSims = 5000, weightSimulation = FALSE, uncertainThresho
       )+
       scale_y_continuous(expand = expansion(mult=0.15))+
       labs(y="Effect on action (% sims)",x="Positive press perturbation node")+
-      theme_minimal(base_size = 10)+
+      theme_minimal(base_size = qnmBaseSize)+
       theme(
         legend.position = "bottom",
         axis.text.y = element_blank(),
