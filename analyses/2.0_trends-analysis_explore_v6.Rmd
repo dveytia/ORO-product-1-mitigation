@@ -1816,6 +1816,9 @@ NB: Because compares OROs between each other, cannot include deployment because 
 ## Loop through the different components and fit glm
 # sum metric values across years
 
+glmBaseSize <- 12
+axisTitleSize <- 13
+
 # different components to loop through
 components <- unique(allComponentDat_model$component) 
 components <- components[!(components %in% c("publications","deployment"))]
@@ -1955,10 +1958,10 @@ for(c in 1:length(components)){
                aes(x=prop_pub, y = prop_y, shape = shape_type, col=oro_type),
                              size=3, alpha = 0.25)+
     ggrepel::geom_text_repel(data = tmpDatSums, aes(x=prop_pub, y = prop_y, label = oro_type), force = 0.3,
-                             size=3)+
+                             size=3.5)+
     ggrepel::geom_text_repel(data = pval, aes(label = label, fontface=3), 
                              x=Inf, y=-Inf, hjust=1, vjust=0, col="black",
-                             size=3.5)+
+                             size=4)+
     scale_color_manual(
       breaks = typeAES$label,
       values = typeAES$colour
@@ -1978,9 +1981,9 @@ for(c in 1:length(components)){
       y = paste("Proportion of",tolower(componentAES$label[componentAES$level == components[c]])),
       color = "ORO type"
     )+
-    theme_minimal()+
+    theme_minimal(glmBaseSize)+
     theme(
-      axis.title = element_text(size=9),
+      axis.title = element_text(size=axisTitleSize),
       plot.margin = unit(c(0.7,0.3,0.3,0.3),"cm")
     )
   
@@ -1989,8 +1992,6 @@ for(c in 1:length(components)){
   leg <- ggpubr::get_legend(ggps_prop[[c]])
   ggps_prop[[c]] <- ggps_prop[[c]]+theme(legend.position = "none")
   
-
- 
   
 }
 
@@ -2143,14 +2144,15 @@ prop_oro_summary_df <- allComponentDat_model %>%
 
 
 # Plot proportion of each dimension per ORO
+propBaseSize <- 11
 dist_component_ggp_bottom <- ggplot(data = prop_oro_summary_df, aes(x=component))+
   geom_col(aes(y=prop_component, fill=oro_type), position="stack")+
-  geom_text(aes(label = scales::number(total_component, accuracy = 1, big.mark = ",")), check_overlap = TRUE, vjust=0, y=1)+
+  geom_text(aes(label = scales::number(total_component, accuracy = 1, big.mark = ",")), check_overlap = TRUE, vjust=0, hjust=0, y=1, angle=45)+
   scale_fill_manual(
     breaks = typeAES$label,
     values = typeAES$colour
   )+
-  scale_y_continuous(expand = expansion(mult=c(0,0.1)))+
+  scale_y_continuous(expand = expansion(mult=c(0,0.2)))+
   labs(
     x="Dimension (i.e. Node)",
     y="Proportion",
@@ -2158,7 +2160,8 @@ dist_component_ggp_bottom <- ggplot(data = prop_oro_summary_df, aes(x=component)
     tag = "a"
   )+
   guides(fill=guide_legend(ncol=2))+
-  theme_minimal(base_size = 10)+
+  coord_cartesian(clip="off")+
+  theme_minimal(base_size = propBaseSize)+
   theme(
     axis.text.x = element_text(angle=45, hjust=1),
     legend.position = "bottom",
@@ -2169,22 +2172,22 @@ dist_component_ggp_bottom
 
 
 ## Combine plots
-ggps_prop_leg <- lapply(ggps_prop, function(x) x+theme(legend.position="right"))
+ggps_prop_leg <- lapply(ggps_prop, function(x) x+theme(legend.position="bottom"))
 
-combined <- wrap_plots(ggps_prop_leg, guides = "collect")
+combined <- wrap_plots(ggps_prop_leg, guides = "collect") & theme(legend.position = 'bottom')
 
 
 plotLayout<-"AB
 #B"
 
-combined2 <- dist_component_ggp_bottom + combined + plot_annotation(tag_levels = "a", tag_suffix = ")")+plot_layout(widths = c(1.2,3), heights=c(1,0.2), design = plotLayout)
+combined2 <- dist_component_ggp_bottom + combined + plot_annotation(tag_levels = "a", tag_suffix = ")")+plot_layout(widths = c(1.3,3), heights=c(1,0.2), design = plotLayout)
 
 
 ggsave(
   filename = here::here("figures/main/GlmFitPlots_proportion_andBarplots.pdf"),
   plot = combined2,
   width = 12,
-  height = 7
+  height = 8
 )
 
 ```
