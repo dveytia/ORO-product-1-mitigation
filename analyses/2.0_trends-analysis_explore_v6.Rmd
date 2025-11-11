@@ -1772,11 +1772,14 @@ plotList <- c(
 
 combined <- wrap_plots(plotList, ncol=3,
                        guides="collect", widths = c(1.6, 1,1))+
-  plot_annotation(tag_levels = "a", tag_suffix = ")")
+  plot_annotation(tag_levels = "a", tag_suffix = ")") &
+  theme(legend.position = "bottom",
+        legend.key.width = unit(0.6, "in"),
+        legend.title = element_text(margin = margin(r = 15)))
 
 ggsave(
   here::here("figures/main/conceptual_networks_heatmaps_qnm.pdf"),
-  width=12, height=12, 
+  width=11, height=13, 
   plot=combined
 )
 
