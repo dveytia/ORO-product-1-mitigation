@@ -1151,6 +1151,7 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
     scale_edge_width_identity()+
     scale_x_continuous(expand = expansion(mult=0.1))+
     scale_y_continuous(expand = expansion(mult=0.1))+
+    coord_cartesian(clip="off")+
 
     geom_node_label(aes(label = componentAES$label[match(name, componentAES$level)], fill = name), #repel = TRUE,
                    label.size = nodeTextSize, alpha=0.8,
@@ -1174,7 +1175,7 @@ concept_ggraph_plots <- lapply(cluster_order, function(k) {
   plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], end_cap_mm = 10, end_cap_mult_factor=1.8)
 })
 
-
+concept_ggraph_plots[[3]]
 
 # Arrange the ggraph plots horizontally according to cluster number
 final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2))
@@ -1198,7 +1199,7 @@ ggsave(
 
 
 
-```{r for mCDR and MRE and Efficiency calculate node importance and influence}
+```{r calculate node importance and influence}
 networkBaseSize <- 16
 
 plot_network_metrics <- function(network_graph){
@@ -1292,7 +1293,7 @@ concept_metrics_heatmaps <- lapply(c(2,3,4), function(k) {
 
 ```
 
-```{r SKIP and load in next chunk - for mCDR and MRE and Efficiency compute QNM , eval=FALSE}
+```{r SKIP and load in next chunk - compute QNM , eval=FALSE}
 source(here::here("R/impact.barplot.myMod"))
 source(here::here("R/extend.vector"))
 source(here::here("R/my.QPress.R"))
@@ -1442,8 +1443,12 @@ plot_QNM <- function(k, nSims = 5000, weightSimulation = FALSE, uncertainThresho
       geom_col(aes(y=Positive), fill="#4dac26")+ 
       geom_col(aes(y=-Negative), fill = "#d01c8b")+
       
-      geom_text(aes(y=Positive, label = Positive), vjust=0)+
-      geom_text(aes(y=-Negative, label = paste0("-",Negative)), vjust=1)+
+      geom_text(
+        data = qp_results_df[0 < qp_results_df$Positive,],
+        aes(y=Positive, label = Positive), vjust=0)+
+      geom_text(
+        data = qp_results_df[0 < qp_results_df$Negative,],
+        aes(y=-Negative, label = paste0("-",Negative)), vjust=1)+
       
       geom_hline(yintercept=0, col="red")+
       # scale_fill_stepsn(name = stringr::str_wrap("Positive effect on action (% sims)", width=25), n.breaks=5, colours = viridis(5))+
@@ -1464,7 +1469,7 @@ plot_QNM <- function(k, nSims = 5000, weightSimulation = FALSE, uncertainThresho
         axis.ticks.y = element_blank(),
         axis.text.x=element_text(angle=45, hjust=1)
       )
-    
+    # qnm_ggp
     return(qnm_ggp)
     
   } # end of !is.null(ModSim)
@@ -2527,18 +2532,18 @@ for(og in which(names(oro_groups)=="narrative")){
 
 ## Plot with international policy moments as well
 
+intPolMoments <- readxl::read_excel(
+  here::here("data/raw-data/international_policy_moments.xlsx")
+)%>%
+  mutate(
+    year_min = as.numeric(year_min),
+    year_max = as.numeric(year_max),
+    component = "International policy"
+  )
+tmpYlims <- c(min(intPolMoments$year_min), max(intPolMoments$year_max)+2)
+
 ## Old version of just vertical lines and geom_text
-# intPolMoments <- readxl::read_excel(
-#   here::here("data/raw-data/international_policy_moments.xlsx")
-# )%>%
-#   mutate(
-#     year_min = as.numeric(year_min),
-#     year_max = as.numeric(year_max),
-#     component = "International policy"
-#   )
-# 
-# tmpYlims <- c(min(intPolMoments$year_min), max(intPolMoments$year_max)+2)
-# 
+
 # ggp_intPolMom <- ggplot()+
 #   geom_rect(data = intPolMoments,
 #            aes(xmin=.data$year_min, xmax=.data$year_max, fill = .data$label),
