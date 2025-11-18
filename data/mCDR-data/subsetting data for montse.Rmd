@@ -1,0 +1,215 @@
+---
+title: "subsetting data for montse"
+author: "Devi Veytia"
+date: "2025-11-18"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r load libraries, eval=FALSE}
+# general data handing
+library(dplyr)
+library(dbplyr)
+library(R.utils)
+library(ggplot2)
+library(ggalluvial)
+library(tidyr)
+library(stringr)
+library(viridis)
+library(countrycode)
+library(broom)
+library(conflicted)
+library(tidyverse)
+
+
+conflict_prefer("select", "dplyr")
+conflicts_prefer(dplyr::filter)
+
+
+
+```
+
+
+# Publications
+
+
+```{r mcdr publications, eval=FALSE}
+# get id and year metadata
+require(RSQLite)
+p1_db <- RSQLite::dbConnect(RSQLite::SQLite(),
+                      here::here("data","sqlite-databases","product1.sqlite"),
+                                 create=FALSE)
+
+uniquerefs <- tbl(p1_db, "uniquerefs_update2025") 
+
+mCDR_pubs <- tbl(p1_db, "pred_oro_type_mit_long") %>%
+  left_join(uniquerefs, by = "analysis_id") %>%
+  collect() %>%
+  filter(grepl("CDR", level), 0.5 <= mean_prediction) %>%
+  mutate(level = gsub("[.]","-", level)) %>%
+  rename(oro_type = level)
+
+dbDisconnect(p1_db)
+
+## save
+save(mCDR_pubs, file = here::here("data/mCDR-data/mCDR_pubs.RData"))
+
+unique(mCDR_pubs$oro_type)
+colnames(mCDR_pubs)
+```
+
+File: mCDR_pubs, saved in mCDR_pubs.RData
+
+Colnames:
+
+*   analysis_id : document id
+*   oro_type : type of mCDR ("CDR-BC" "CDR-BioPump" "CDR-OAE")
+*   mean_prediction : relevance prediction from the LLM
+*   std_prediction : std deviation of relevance prediction from LLM
+
+other columns contain bibliometric metadata from WOS or scopus
+
+
+# Legislation / policy
+
+```{r mCDR legislation or policy, eval=FALSE}
+
+## get metadata
+leg_metadata <- read.csv(here::here("data/derived-data/faolex_ecolex_dedup.csv")) %>%
+  select(search_id, Title, Abstract, Document.URL, Date, Keywords, Database) 
+
+## read in mCDR matches 
+mCDR_leg <- read.csv(here::here("data/derived-data/en-fr-de-sp_fullTextQueryMatches_allOROs_long.csv")) %>%
+  rename(country_name = Country_short, year=Year, oro_type = oroType) %>%
+  mutate(
+    oro_type = case_when(
+      oro_type == "M_MRE_general" ~ "MRE-General", ## Note to fix this later
+      oro_type == "M_MRE_ocean" ~ "MRE-Ocean",
+      oro_type == "M_MRE_located" ~ "MRE-Located",
+      oro_type == "M_MRE_bio" ~ "MRE-Bio",
+      oro_type == "M_Incr_eff" ~ "Efficiency",
+      oro_type == "M_CCS" ~ "CCS",
+      oro_type == "M_CDR_other" ~ "CDR-General",
+      oro_type == "M_CDR_bc" ~ "CDR-BC",
+      oro_type == "M_CDR_oae" ~ "CDR-OAE",
+      oro_type == "M_CDR_biopump" ~ "CDR-BioPump",
+      oro_type == "M_CDR_cult" ~ "CDR-Cult",
+      TRUE ~ "Other"
+    )) %>%
+  filter(grepl("CDR", oro_type)) %>%
+  select(-X) %>%
+  # attach metadata
+  left_join(leg_metadata)
+
+print("unique ORO types:")
+print(unique(mCDR_leg$oro_type))
+# "CDR-BC"      "CDR-OAE"     "CDR-BioPump" "CDR-Cult"    "CDR-General"
+
+## save
+save(mCDR_leg, file = here::here("data/mCDR-data/mCDR_leg.RData"))
+```
+
+File: mCDR_leg, saved in mCDR_leg.RData
+
+Note that there are more cdr oro_types than what was used in the paper -- this is because some cateogries did not perform well with the LLM classifier and we could not get corresponding publication estimates.
+
+Columns:
+
+*   search_id : the document ID as indexed in the source database
+*   Database: the name of the database where the document was retrieved from
+*   oro_type: the type of ORO
+*   matched_terms: terms matched in the document from the search query
+*   year: document year, parsed into standard format from Date
+*   Document.type: type of document as indexed by the database
+*   country_name: the country 
+*   Binding.legislation: boolean indicator of whether the doucment is binding (ie legislation) or non-binding (ie policy)
+*   National.level: boolean indicator of whether the document is National level or not (e.g. agreement)
+*   Title: Document title
+*   Abstract: Document abstract
+*   Document.URL: URL of the document if available
+*   Date: Document publication date as indexed by the database (not standardised format)
+*   Keywords: Document keywords
+
+# Posts
+
+```{r summarise number of posts, eval=FALSE}
+mCDR_posts <- read.csv(here::here("outputs/sentiment_predictions/sentiment_summary_oro_year.csv"))%>%
+  mutate(
+    weighted_ratio_pn = weighted_positive/weighted_negative,
+    prop_positive = weighted_positive/n_posts_weighted
+  ) %>%
+  select(oro_type, year, n_posts_qry_weighted, n_posts_weighted, 
+         weighted_positive, weighted_negative, weighted_ratio_pn, prop_positive)
+
+mCDR_posts <- reshape2::melt(mCDR_posts,
+                           id.vars = c("oro_type","year"),
+                           variable.name = "variable_name",
+                           value.name = "y")
+mCDR_posts <- mCDR_posts %>%
+  mutate(
+    variable_name = case_when(
+      variable_name=="n_posts_qry_weighted" ~ "N posts (query-weighted)",
+      variable_name=="n_posts_weighted" ~ "N posts (query and like-weighted)",
+      variable_name=="weighted_positive"~"N positive posts (query and like-weighted)",
+      variable_name=="weighted_negative"~"N negative posts (query and like-weighted)",
+      variable_name=="prop_positive"~"Proportion positive posts",
+      variable_name=="weighted_ratio_pn"~"Ratio positive:negative posts",
+      TRUE ~ "other"
+      )) %>%
+  mutate(
+    component = case_when(
+      variable_name=="N posts (query-weighted)" ~ "public interest",
+      variable_name=="N posts (query and like-weighted)" ~ "public interest weighted",
+      variable_name=="N positive posts (query and like-weighted)"~"public support",
+      variable_name=="N negative posts (query and like-weighted)"~"public opposition",
+      variable_name=="Proportion positive posts"~"public support (relative)",
+      variable_name=="Ratio positive:negative posts"~"public support agreement",
+      TRUE ~ "other"
+      ),
+    oro_type = gsub("_","-", toupper(oro_type))
+  ) %>%
+  mutate(
+    oro_type = case_when(
+      oro_type == "CDR-BIOPUMP" ~ "CDR-BioPump",
+      oro_type == "CDR-GENERAL" ~ "CDR-General",
+      oro_type == "INCR-EFF" ~ "Efficiency",
+      oro_type == "MRE-GENERAL" ~ "MRE-General",
+      oro_type == "MRE-BIO" ~ "MRE-Bio",
+      oro_type == "MRE-LOCATED" ~ "MRE-Located",
+      oro_type == "MRE-OCEAN" ~ "MRE-Ocean",
+      TRUE ~ oro_type
+    )
+  ) %>%
+  filter(
+    component %in% c("public interest", "public support"),
+    grepl("CDR", oro_type)
+  ) 
+
+
+unique(mCDR_posts$component)
+unique(mCDR_posts$oro_type)
+
+
+## Save
+save(mCDR_posts, file=here::here("data/mCDR-data/mCDR_posts.RData"))
+
+```
+
+file: mCDR_posts, saved in mCDR_posts.RData
+
+columns:
+
+*   oro_type: type of ORO (note more types than in publication, see prev. section)
+*   year: post year
+*   variable_name: the variable long name and units 
+*   y: the number of posts for the oro_type x year combination
+*   component: the name of the variable (e.g. public interest, public support)
+
+
+
+
