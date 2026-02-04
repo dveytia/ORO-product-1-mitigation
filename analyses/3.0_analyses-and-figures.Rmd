@@ -317,7 +317,7 @@ nPubs_oro <- tbl(p1_db, "pred_oro_type_mit_long") %>%
   ) %>%
   select(oro_type, component, variable_name, N)
 
-dbDisconnect(p1_db)
+RSQLite::dbDisconnect(p1_db)
 
 
 
@@ -412,7 +412,18 @@ year_oro_summary_df <- allComponentDat_model %>%
   )%>%
   select(oro_type, component, year, prop_component, N) 
   
-
+## check how many policy documents in 2024 -- is it 0?
+year_oro_summary_df %>% 
+  filter(grepl("policy|legislation",component,ignore.case = TRUE), 2024 <= year) %>% 
+  group_by(component, year) %>%
+  summarise(
+    total_N = sum(N, na.rm=T)
+  ) %>%
+  print()
+#   component                  year total_N
+#   <fct>                     <dbl>   <dbl>
+# 1 Policy (N documents)       2024      10
+# 2 Legislation (N documents)  2024      45
 
 # Annual plot of each dimension per ORO
 year_component_ggp <- ggplot(data = year_oro_summary_df, aes(x=year))+
@@ -621,8 +632,146 @@ ggsave(
 )
 ```
 
+## Drivers of spikes in deployment
+```{r}
+## MRE-Ocean -----------------
+MREOcean_changeYears <- readxl::read_excel(here::here("data/raw-data/external/IRENA-electricity-statistics-by-country-year-2024.xlsx"),
+                         sheet = "Country") %>% 
+  mutate(year = as.numeric(Year), oro_type = "MRE-Ocean")%>%
+  filter(
+    Technology %in% c("Marine energy"),
+    !is.na(`Electricity Installed Capacity (MW)`),
+    2010 <= year &
+      year <= 2015
+  ) 
 
 
+topDiff <- MREOcean_changeYears %>%
+  arrange(Country, year) %>%
+  group_by(Region) %>%
+  mutate(difference = `Electricity Installed Capacity (MW)` - first(`Electricity Installed Capacity (MW)`)) %>% 
+  filter(0 < difference)%>%
+  select(
+    Region, Country, year, `Electricity Installed Capacity (MW)`, difference
+  ) %>%
+  arrange(desc(difference))
+topDiff %>% head()
+
+mreOceanTime_ggp<- ggplot(MREOcean_changeYears %>%
+         group_by(Region, year) %>%
+         summarise(y = sum(`Electricity Installed Capacity (MW)`, na.rm=T)),
+       aes(as.integer(year), y, col = Region))+
+  # geom_rect(
+  #   xmin = deplChangePoints$`25%`[deplChangePoints$oro_type == "MRE-Ocean"],
+  #   xmax = deplChangePoints$`75%`[deplChangePoints$oro_type == "MRE-Ocean"],
+  #   ymin = -Inf, ymax = Inf,
+  #   fill = "lightgrey", alpha = 0.5, col="transparent"
+  # )+
+  # geom_vline(xintercept = deplChangePoints$`50%`[deplChangePoints$oro_type == "MRE-Ocean"], col="red")+
+  geom_line()+
+  scale_x_continuous(breaks = scales::pretty_breaks())+
+  geom_text(data = data.frame(
+    year = topDiff$year[1],
+    y= 150,
+    label = stringr::str_wrap("Sihwa Lake Tidal Power Station (255 MW), Republic of Korea", width = 20)
+  ), aes(year,y,label = label),size=3, inherit.aes = FALSE, hjust=0)+
+  labs(
+    x="Year",
+    y = "Electricity Installed Capacity (MW)",
+    col = "Region"
+  )+
+  theme_minimal()+
+  theme(
+    legend.position = "right"
+  )
+mreOceanTime_ggp
+
+# The jump in Asia was due to Republic of Korea -- Sihwa Lake Tidal Power Station 255 MW
+
+
+## CCS -------------------------------
+ccs_changeYears <- readxl::read_excel(here::here("data/raw-data/external/CRSC_CYCLE_4_FINAL_2024_160724.xlsx")) %>%
+  filter(grepl("shore|sea", area, ignore.case=T), !is.na(year_of_publication)) %>%
+  filter(project_spec == "YES") %>%
+  mutate(
+    year = as.numeric(year_of_publication),
+    `Storage capacity (Mt)` = rowSums(select(., sum_low, sum_mid, sum_high), na.rm = TRUE)
+    ) %>%
+  filter(
+    2012 <= year &
+      year <= 2017
+  )
+
+summary(ccs_changeYears)
+
+
+
+ccsStorTime_ggp <- ggplot(data=ccs_changeYears %>%
+         group_by(country, year) %>%
+         summarise(y = sum(`Storage capacity (Mt)`, na.rm=T)))+
+  # geom_vline(xintercept = deplChangePoints$`50%`[deplChangePoints$oro_type == "CCS"], col="red")+
+  # geom_rect(
+  #   xmin = deplChangePoints$`25%`[deplChangePoints$oro_type == "CCS"],
+  #   xmax = deplChangePoints$`75%`[deplChangePoints$oro_type == "CCS"],
+  #   ymin = -Inf, ymax = Inf,
+  #   fill = "lightgrey", alpha = 0.5, col="grey"
+  # )+
+  geom_line(aes(year, y, col = country))+
+  # geom_line(data=ccs_changeYears %>%
+  #        group_by(region, year) %>%
+  #        summarise(y = sum(`Storage capacity (Mt)`, na.rm=T)),
+  #      aes(year, y, col = region))+
+  geom_point(aes(year, y, col = country), size=3)+
+  scale_color_brewer(type="qual")+
+  guides(color=guide_legend(nrow=2))+
+  labs(
+    x="Year",
+    y = "Storage capacity (Mt)",
+    col = "Country"
+  )+
+  theme_minimal()+
+  theme(
+    legend.position = "bottom"
+  )
+ccsStorTime_ggp
+
+norwayCCS <- ccs_changeYears %>%
+  ungroup()%>%
+  filter(country == "Norway", year == 2014) %>%
+  as.data.frame()
+
+length(unique(norwayCCS$site_name)) # 9 sites in Norway in 2014
+
+library(ggOceanMaps)
+norCCS2014 <- qmap(norwayCCS, size=`Storage capacity (Mt)`,bathymetry=TRUE)
+
+
+## Combine all plots
+plotList = list(
+    mreOceanTime_ggp+theme(plot.margin = unit(c(1.2,0,0,0.5),"cm")), 
+    ccsStorTime_ggp+theme(plot.margin = unit(c(1.2,0,0,0.5),"cm")), 
+    norCCS2014+theme(plot.margin = unit(c(1.2,0,0,0.5),"cm"))
+)
+
+
+p_all <- wrap_plots(plotList, ncol = 2, widths = c(1,1), heights = c(1,1.5)) + 
+  theme(plot.tag.position = c(0, 1),  # tags top-left
+        plot.tag = element_text(size = 10))+ 
+  plot_annotation(
+  tag_levels = "a",
+  tag_prefix = "",
+  tag_suffix = ")"
+)
+
+# Save
+ggsave(
+  here::here("figures/supplemental/drivers_deployment_changes_MRE_CCS.pdf"),
+  p_all,
+  width = 10, height = 9
+)
+
+
+```
 
 
 # Network analysis
@@ -682,8 +831,9 @@ try_BCTransform <- function(series){
 ## Loop 1 -- loop through OROs
 TE_results <- data.frame()
 TE_results_summary <- data.frame()
+edges_dtw_df <- data.frame() # to save all dtw lag data
 for(oro in oros){
-  # oro <- "MRE-Ocean" # for testing
+  # oro <- "Efficiency" # for testing
   
   # Data processing
   # Fillin missing values with a 0 -- so that same years are represented across time series
@@ -708,14 +858,18 @@ for(oro in oros){
     TE_ratio = rep(NA, nrow(edges)),
     optDelay = rep(NA, nrow(edges)),
     optCor = rep(NA, nrow(edges)),
-    dtw=rep(NA, nrow(edges))
+    dtw_lag_mean=rep(NA, nrow(edges)),
+    dtw_lag_sd=rep(NA, nrow(edges))
   )
   
   # Loop through the edges and test for causality
   for(e in 1:nrow(edges)){
+    # e <- 15 # for testing
     
-    X = oroDat$y_trans[oroDat$component == edges[e,1]]
-    Y = oroDat$y_trans[oroDat$component == edges[e,2]]
+    X = oroDat$y_trans[oroDat$component == edges[e,1]] # cause
+    Y = oroDat$y_trans[oroDat$component == edges[e,2]] # effect
+    year = oroDat$year[oroDat$component == edges[e,1]] 
+
     if(length(X) != length(Y)){next}
     
     # remove leading or trailing zeros
@@ -727,6 +881,9 @@ for(oro in oros){
     first_nonzero <- min(which(rowSums(edge_dat != 0) ==ncol(edge_dat)))
     last_nonzero  <- max(which(rowSums(edge_dat != 0) ==ncol(edge_dat)))
     edge_dat <- edge_dat[first_nonzero:last_nonzero, ]
+    edge_dat$year <- year[first_nonzero:last_nonzero]
+
+
     
     if(nrow(edge_dat) == 0){next}
     
@@ -748,7 +905,8 @@ for(oro in oros){
       edgesResults$TE_ratio[e] <- NA
       edgesResults$optDelay[e] <- NA
       edgesResults$optCor[e] <- NA
-      edgesResults$dtw[e] <- NA
+      edgesResults$dtw_lag_mean[e] <- NA
+      edgesResults$dtw_lag_sd[e] <- NA
     }else{
       
       ## Save outputs into data frame
@@ -759,11 +917,32 @@ for(oro in oros){
       edgesResults$TE_ratio[e] <- TE_out$TEratio
       # optimal time delay inferred by cross-correlation of X,Y. It is positive if Y is simply just a time-shift of X (e.g. Y[t]=X[t-optDelay]).
       edgesResults$optDelay[e] <- TE_out$follOut$optDelay 
-      # time series of optimal warping-path from DTW that is corrected by cross correlation. It is approximately that Y[t]=X[t-optIndexVec[t]])
-      edgesResults$dtw[e] <- mean(TE_out$follOut$optIndexVec[,1], na.rm=T)
+      # time series of optimal warping-path from DTW that is corrected by cross correlation. 
+      # It is approximately that Y[t]=X[t-optIndexVec[t]])
+      t = 1:length(edge_dat$X)
+      DTW_lags = TE_out$follOut$optIndexVec[,1]
+      edgesResults$dtw_lag_mean[e] <- mean(DTW_lags, na.rm=T)
+      edgesResults$dtw_lag_sd[e] <- sd(DTW_lags, na.rm=T)
       # optimal correlation of Y[t]=X[t-optDelay] for all t
       # Maybe if optCor is negative, that can give me the sign 
       edgesResults$optCor[e] <- TE_out$follOut$optCor
+
+      ## Also save raw data 
+      edges_dtw_df_tmp <- data.frame(
+        oro_type = rep(oro, length(edge_dat$X)),
+        year = edge_dat$year,
+        xvar = edges[e,1],
+        yvar = edges[e,2],
+        x = edge_dat$X,
+        y = edge_dat$Y,
+        x_dtw_lag = edge_dat$X[t-DTW_lags],
+        dtw_lag = -DTW_lags,
+        pval = TE_out$pval,
+        TE_ratio = TE_out$TEratio
+      )
+
+      edges_dtw_df <- bind_rows(edges_dtw_df, edges_dtw_df_tmp)
+
     }
     
   }
@@ -798,12 +977,15 @@ for(oro in oros){
 }
 
 # clean
-# rm(oroDat, nodes, edges, TE_out, edgesResults)
+# rm(oroDat, nodes, edges, TE_out, edgesResults, edges_dtw_df_tmp)
 
 
 
 
 save(TE_results, TE_results_summary, file = here::here("data/derived-data/TE_results.RData"))
+save(edges_dtw_df, file = here::here("data/derived-data/TE_dtw_lag_data.RData"))
+writexl::write_xlsx(edges_dtw_df, here::here("outputs/TE_dtw_lag_data.xlsx"))
+
 ```
 
 
@@ -811,6 +993,7 @@ save(TE_results, TE_results_summary, file = here::here("data/derived-data/TE_res
 ```{r load TE results}
 
 load(here::here("data/derived-data/TE_results.RData")) # TE_results, TE_results_summary
+load(here::here("data/derived-data/TE_dtw_lag_data.RData")) # edges_dtw_df
 
 ```
 
@@ -929,7 +1112,7 @@ vlte_ggp
 
   
 ggsave(
-  here::here("figures/supplemental/VLTE_demonstration_plot.pdf"),
+  here::here("figures/supplemental/VLTE_demonstration_plot2.pdf"),
   width = 4, height=3,
   plot = vlte_ggp
 )
@@ -1001,7 +1184,27 @@ for (k in 1:n_clusters) {
            !is.na(TE_ratio),
            0 < TE_ratio
            )
+
   cluster_te$TE_ratio[cluster_te$TE_ratio==Inf] <- max(cluster_te$TE_ratio[is.finite(cluster_te$TE_ratio)])
+  
+  # Do we take the mean dtw lag per oro_type first, then aggregate across oro_types?
+  # Or (shown below) I aggregate all dtw lag data across oro_types directly?
+  # For now choose option 1, but keep this code (option 2) in case needed later
+
+  dtw_dat_te <- edges_dtw_df %>%
+    filter(oro_type %in% types_in_cluster,
+            xvar %in% selectedComponents,
+            yvar %in% selectedComponents,
+            pval <= 0.05, !is.na(TE_ratio), 0 < TE_ratio
+    )%>%
+    select(oro_type, NodeX = xvar, NodeY = yvar, dtw_lag) %>%
+    group_by(NodeX, NodeY) %>%
+    summarise(
+      dtw_lag_mean = mean(dtw_lag, na.rm=T),
+      dtw_lag_sd = sd(dtw_lag, na.rm=T),
+      .groups="drop"
+    )
+
   
   # Aggregate TE_ratio per NodeX → NodeY pair
   edge_summary <- cluster_te %>%
@@ -1012,7 +1215,8 @@ for (k in 1:n_clusters) {
       avg_ratio = mean(TE_ratio, na.rm = TRUE),
       avg_correlation = mean(optCor, na.rm=T),
       med_correlation = quantile(optCor, na.rm=T, probs = 0.5),
-      avg_delay = mean(optDelay, na.rm=T),
+      avg_optDelay = mean(optDelay, na.rm=T),
+      avg_dtw_lag = mean(dtw_lag_mean, na.rm=T),
       sign = ifelse(avg_correlation >= 0, 1, -1),
       oro_types = paste(unique(oro_type), collapse = ", "), 
       .groups="drop"
@@ -1094,7 +1298,11 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
       aes(
         edge_width = width,
         edge_alpha = weight,
-        label = paste0("lag = ", scales::number(avg_delay, accuracy = 1), ", ", oro_types),
+        # label = ifelse(cluster_label %in% c("CCS","Efficiency"), 
+        #                paste0("lag = ", scales::number(avg_dtw_lag, accuracy = 1)),
+        #                paste0("lag = ", scales::number(avg_dtw_lag, accuracy = 1), ", ", oro_types)
+        #                ),
+        label = paste0("lag = ",ceiling(avg_dtw_lag), ", ", oro_types), 
         edge_color = color,
         filter = sign==1
       ),
@@ -1112,7 +1320,11 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
       aes(
         edge_width = width,  # abs for width scaling
         edge_alpha = weight,
-        label = paste0("lag = ", scales::number(avg_delay, accuracy = 1), ", ", oro_types),
+        # label = ifelse(cluster_label %in% c("CCS","Efficiency"), 
+        #                paste0("lag = ", scales::number(avg_dtw_lag, accuracy = 1)),
+        #                paste0("lag = ", scales::number(avg_dtw_lag, accuracy = 1), ", ", oro_types)
+        #                ),
+        label = paste0("lag = ", ceiling(avg_dtw_lag), ", ", oro_types),
         edge_color = color,
         filter = sign==-1
       ),
@@ -1171,18 +1383,28 @@ cluster_order <- 1:n_clusters
 concept_cluster_names2 <- list(
   "CCS","mCDR","Efficiency","MRE"
 )
+
+# Version with all clusters - CCS, mCDR, Efficiency, MRE
 concept_ggraph_plots <- lapply(cluster_order, function(k) {
   plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], end_cap_mm = 10, end_cap_mult_factor=1.8)
 })
 
-concept_ggraph_plots[[3]]
+# Version with only MRE, Efficiency, and mCDR 
+concept_ggraph_plots_selected <- lapply(c(4,3,2), function(k) {
+  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], end_cap_mm = 10, end_cap_mult_factor=1.8) +
+  labs(tag = "") # remove tag for selected version
+})
 
 # Arrange the ggraph plots horizontally according to cluster number
 final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2))
+final_plot_selected <- wrap_plots(concept_ggraph_plots_selected, nrow = 2, widths = c(1,1.2)) +
+  plot_annotation(tag_levels = "a", tag_suffix = ")") 
+
 
 
 # Show or save
 ggsave(filename=here::here("figures/main/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
+ggsave(filename=here::here("figures/main/conceptual_cluster_networks_selected.pdf"), final_plot_selected, width = 10, height = 8)
 
 ```
 
@@ -1290,7 +1512,28 @@ concept_metrics_heatmaps <- lapply(c(2,3,4), function(k) {
   plot_network_metrics(concept_meta_graphs[[k]])
 })
 
+## Plot network metrics as a supplementary figure
+plot_list <- list(
+  concept_metrics_heatmaps[[3]]+
+    ggtitle("MRE"),
+  concept_metrics_heatmaps[[2]]+
+    ggtitle("Efficiency"),
+  concept_metrics_heatmaps[[1]]+
+    ggtitle("mCDR")
+)
 
+combined <- wrap_plots(
+  plot_list, ncol=2,
+  guides="collect")+
+  plot_annotation(tag_levels = "a", tag_suffix = ")") &
+  theme(legend.position = "bottom",
+        legend.key.width = unit(0.6, "in"),
+        legend.title = element_text(margin = margin(r = 15)))
+
+ggsave(
+  here::here("figures/supplemental/network_metrics_heatmaps.pdf"),
+  width = 10, height=10,
+  plot = combined)
 ```
 
 ```{r SKIP and load in next chunk - compute QNM , eval=FALSE}
@@ -1491,6 +1734,26 @@ load(here::here("data/derived-data/concept_qnm_barplots.RData"))
 
 ```
 
+```{r plot just the QNM barplots}
+plotList <- list(
+  concept_qnm_barplots[[3]]+
+    ggtitle("MRE"),
+  concept_qnm_barplots[[2]]+
+    ggtitle("Efficiency"),
+  concept_qnm_barplots[[1]]+
+    ggtitle("mCDR")
+)
+
+combined <- wrap_plots(plotList, ncol=2)+
+  plot_annotation(tag_levels = "a", tag_suffix = ")") 
+
+ggsave(
+  here::here("figures/supplemental/QNM_barplots.pdf"),
+  width=8, height=8,
+  plot=combined
+)
+```
+
 ```{r plot networks and network metrics heatmaps and qnm results for conceptual clusters}
 
 concept_ggraph_plots2 <- lapply(cluster_order, function(k) {
@@ -1529,6 +1792,37 @@ ggsave(
 )
 
 ```
+
+```{r plot networks and qnm results for conceptual clusters}
+
+concept_ggraph_plots2 <- lapply(cluster_order, function(k) {
+  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], end_cap_mm = 10, end_cap_mult_factor=2.5)
+})
+
+plotList <- c(
+  # Networks - MRE, Efficiency, mCDR
+  concept_ggraph_plots2[[4]], concept_ggraph_plots2[[3]], concept_ggraph_plots2[[2]],
+
+  # QNM barplots - MRE, Efficiency, mCDR
+  concept_qnm_barplots[[3]], concept_qnm_barplots[[2]], concept_qnm_barplots[[1]]
+  
+)
+
+combined <- wrap_plots(plotList, ncol=3, byrow=TRUE,
+                       guides="collect", heights = c(1.6,1))+
+  plot_annotation(tag_levels = "a", tag_suffix = ")") &
+  theme(legend.position = "bottom",
+        legend.key.width = unit(0.6, "in"),
+        legend.title = element_text(margin = margin(r = 15)))
+
+ggsave(
+  here::here("figures/main/conceptual_networks_qnm.pdf"),
+  width=14, height=8, 
+  plot=combined
+)
+
+```
+
 
 
 
@@ -1704,7 +1998,10 @@ for(c in 1:length(components)){
       values = c(15, 16, 17)
     ) +
     guides(
-      color = guide_legend(override.aes = list(shape = as.numeric(as.character(shapelookup$shape_type[order(shapelookup$oro_type)])))),
+      color = guide_legend(override.aes = list(shape = as.numeric(as.character(shapelookup$shape_type[order(shapelookup$oro_type)])),
+                                               size = 4,
+                                               alpha = 1
+                                               )),
       shape = "none" 
     )+
     scale_x_continuous(expand = expansion(mult = c(0.15,0)))+
@@ -1756,7 +2053,7 @@ ggps_prop_tagged <- mapply(
     labs(tag = tag) + 
     theme(legend.position = "none",
           plot.tag.position = c(0, 1.1),  # top-left like ggpubr
-          plot.tag = element_text(size = 10, hjust = 0, vjust = 1.2),
+          plot.tag = element_text(size = 13, hjust = 0, vjust = 1.2),
           plot.margin = unit(c(1,0.3,0,0.3),"cm")
           ),
   ggps_prop,
@@ -1776,8 +2073,8 @@ final_plot <- combined + leg +theme(plot.margin = unit(c(0.1,0,0,0.1),"cm")) +
 ggsave(
   filename = here::here("figures/main/GlmFitPlots_proportion.pdf"),
   plot = final_plot,
-  width = 10,
-  height = 6.5
+  width = 11,
+  height = 8
 )
 
 ```
@@ -1840,7 +2137,7 @@ nPubs_oro <- tbl(p1_db, "pred_oro_type_mit_long") %>%
   ) %>%
   select(oro_type, component, variable_name, N)
 
-dbDisconnect(p1_db)
+RSQLite::dbDisconnect(p1_db)
 
 
 
@@ -1913,7 +2210,13 @@ combined <- wrap_plots(ggps_prop_leg, guides = "collect") & theme(legend.positio
 plotLayout<-"AB
 #B"
 
-combined2 <- dist_component_ggp_bottom + combined + plot_annotation(tag_levels = "a", tag_suffix = ")")+plot_layout(widths = c(1.3,3), heights=c(1,0.2), design = plotLayout)
+combined2 <- dist_component_ggp_bottom + combined + 
+plot_annotation(tag_levels = "a", tag_suffix = ")")+
+plot_layout(widths = c(1.3,3), heights=c(1,0.2), design = plotLayout) &
+theme(
+  legend.title.position = "top",
+  legend.title = element_text(hjust = 0.5)
+)
 
 
 ggsave(
