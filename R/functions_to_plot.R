@@ -939,3 +939,44 @@ barplots_gdp <- function(data, group = FALSE){
   return(plot)
 
 }
+
+
+#' Functions to plot custom legend keys for positive and negative edges
+#' # Define custom key glyph function for arrow
+draw_key_arrow <- function(data, params, size) {
+  grid::segmentsGrob(
+    x0 = 0, x1 = 1,
+    y0 = 0.5, y1 = 0.5,
+    gp = grid::gpar(
+      col = alpha(data$colour, data$alpha),
+      fill = alpha(data$colour, data$alpha),
+      lwd = data$size * .pt * 0.3,
+      lineend = "butt"
+    ),
+    arrow = grid::arrow(length = grid::unit(0.15, "inches"), type = "closed")
+  )
+}
+
+# Define custom key glyph function for line with dot
+draw_key_linepoint <- function(data, params, size) {
+  grid::gTree(children = grid::gList(
+    grid::segmentsGrob(
+      x0 = 0, x1 = 0.7,
+      y0 = 0.5, y1 = 0.5,
+      gp = grid::gpar(
+        col = alpha(data$colour, data$alpha),
+        lwd = data$size * .pt * 0.3,
+        lineend = "butt"
+      )
+    ),
+    grid::pointsGrob(
+      x = 1,
+      y = 0.5,
+      pch = 16,
+      gp = grid::gpar(
+        col = alpha(data$colour, data$alpha),
+        cex = 1
+      )
+    )
+  ))
+}

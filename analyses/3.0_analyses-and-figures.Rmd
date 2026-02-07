@@ -425,6 +425,7 @@ year_oro_summary_df %>%
 # 1 Policy (N documents)       2024      10
 # 2 Legislation (N documents)  2024      45
 
+
 # Annual plot of each dimension per ORO
 year_component_ggp <- ggplot(data = year_oro_summary_df, aes(x=year))+
   facet_wrap(vars(component), ncol=1, scales = "free_y")+
@@ -558,38 +559,6 @@ allDep_ggp
 
 ```
 
-```{r plot all dimension timeseries together in multipanel figure - legend on side}
-## Plot only timeseries
-plotList <- list(
-  year_component_ggp+
-    theme(legend.position = "none",
-          plot.margin = unit(rep(0.1, 4),"cm")
-          ),
-  year_component_prop_ggp+
-    theme(legend.position = "right",
-          plot.margin = unit(rep(0.1, 4),"cm")
-          ),
-  allDep_ggp +theme(plot.margin = unit(rep(0.1, 4),"cm"))
-)
-
-plotLay <-
-"ABC"
-
-combined <- wrap_plots(plotList,
-                       design = plotLay,
-                       widths = c(1,1,2.5)
-                       )+
-  plot_annotation(tag_levels = "a", tag_suffix = ")")
-
-
-## Save
-ggsave(
-  here::here("figures/main/distribution_by_component_alltimeseries_plots.pdf"),
-  width=14, height=7,
-  plot = combined
-)
-```
-
 
 ```{r plot all dimension timeseries together in multipanel figure - legend on bottom}
 ## Plot only timeseries
@@ -633,7 +602,7 @@ ggsave(
 ```
 
 ## Drivers of spikes in deployment
-```{r}
+```{r drivers of spikes in deployment for MRE and CCS}
 ## MRE-Ocean -----------------
 MREOcean_changeYears <- readxl::read_excel(here::here("data/raw-data/external/IRENA-electricity-statistics-by-country-year-2024.xlsx"),
                          sheet = "Country") %>% 
@@ -741,6 +710,7 @@ norwayCCS <- ccs_changeYears %>%
   as.data.frame()
 
 length(unique(norwayCCS$site_name)) # 9 sites in Norway in 2014
+sum(norwayCCS$`Storage capacity (Mt)`, na.rm=T) # 11115.9 Mt storage capacity in Norway in 2014
 
 library(ggOceanMaps)
 norCCS2014 <- qmap(norwayCCS, size=`Storage capacity (Mt)`,bathymetry=TRUE)
@@ -1030,6 +1000,7 @@ edge_dat <- data.frame(
 first_nonzero <- min(which(rowSums(edge_dat != 0) ==ncol(edge_dat)))
 last_nonzero  <- max(which(rowSums(edge_dat != 0) ==ncol(edge_dat)))
 edge_dat <- edge_dat[first_nonzero:last_nonzero, ]
+edge_dat$year <- year[first_nonzero:last_nonzero]
 
 
 # year = oroDat$year[oroDat$component == "publications"][1:24]
@@ -1153,6 +1124,16 @@ require(tidygraph)
 
 ## Get diagraph objects for each defined cluster
 # Create a data.frame for lookup
+cluster_names <- data.frame(
+  cluster = 1:4,
+  cluster_name = c(
+    "CCS",
+    "mCDR",
+    "Efficiency",
+    "MRE"
+  )
+)
+
 concept_cluster_df <- data.frame(
   oro_type = c(
     "CCS",
@@ -1161,19 +1142,29 @@ concept_cluster_df <- data.frame(
     "MRE-Bio","MRE-Located", "MRE-Ocean"
   ),
   cluster = c(1,rep(2,3),3,rep(4,3))
-)
+) %>%
+  left_join(cluster_names, by="cluster")
+
+
 
 n_clusters <- length(unique(concept_cluster_df$cluster))
 
+
 # List to hold one meta-graph per cluster
+edge_col <- list(positive = "#4dac26", negative = "#d01c8b") # edge colors 
 concept_meta_graphs <- vector("list", n_clusters)
 concept_cluster_names <- vector("list", n_clusters)
+# Data frame to hold summary stats for each edge in each cluster
+concept_meta_stats <- data.frame()
 
+# Loop through clusters and build meta-graph for each
 for (k in 1:n_clusters) {
   # Get oro_types in this cluster
   types_in_cluster <- concept_cluster_df %>%
     filter(cluster == k) %>%
     pull(oro_type)
+
+  cluster_name <- cluster_names$cluster_name[cluster_names$cluster == k]
   
   # Filter TE results for these oro_types and significant edges
   cluster_te <- TE_results %>%
@@ -1191,19 +1182,19 @@ for (k in 1:n_clusters) {
   # Or (shown below) I aggregate all dtw lag data across oro_types directly?
   # For now choose option 1, but keep this code (option 2) in case needed later
 
-  dtw_dat_te <- edges_dtw_df %>%
-    filter(oro_type %in% types_in_cluster,
-            xvar %in% selectedComponents,
-            yvar %in% selectedComponents,
-            pval <= 0.05, !is.na(TE_ratio), 0 < TE_ratio
-    )%>%
-    select(oro_type, NodeX = xvar, NodeY = yvar, dtw_lag) %>%
-    group_by(NodeX, NodeY) %>%
-    summarise(
-      dtw_lag_mean = mean(dtw_lag, na.rm=T),
-      dtw_lag_sd = sd(dtw_lag, na.rm=T),
-      .groups="drop"
-    )
+  # dtw_dat_te <- edges_dtw_df %>%
+  #   filter(oro_type %in% types_in_cluster,
+  #           xvar %in% selectedComponents,
+  #           yvar %in% selectedComponents,
+  #           pval <= 0.05, !is.na(TE_ratio), 0 < TE_ratio
+  #   )%>%
+  #   select(oro_type, NodeX = xvar, NodeY = yvar, dtw_lag) %>%
+  #   group_by(NodeX, NodeY) %>%
+  #   summarise(
+  #     dtw_lag_mean = mean(dtw_lag, na.rm=T),
+  #     dtw_lag_sd = sd(dtw_lag, na.rm=T),
+  #     .groups="drop"
+  #   )
 
   
   # Aggregate TE_ratio per NodeX → NodeY pair
@@ -1211,14 +1202,15 @@ for (k in 1:n_clusters) {
     ungroup()%>%
     group_by(NodeX, NodeY) %>%
     summarise(
+      oro_types = paste(unique(oro_type), collapse = "; "),
       n_sig = n(),
       avg_ratio = mean(TE_ratio, na.rm = TRUE),
       avg_correlation = mean(optCor, na.rm=T),
-      med_correlation = quantile(optCor, na.rm=T, probs = 0.5),
+      # med_correlation = quantile(optCor, na.rm=T, probs = 0.5),
       avg_optDelay = mean(optDelay, na.rm=T),
       avg_dtw_lag = mean(dtw_lag_mean, na.rm=T),
+      max_dtw_lag = max(dtw_lag_mean, na.rm=T),
       sign = ifelse(avg_correlation >= 0, 1, -1),
-      oro_types = paste(unique(oro_type), collapse = ", "), 
       .groups="drop"
     )%>%
     mutate(
@@ -1231,21 +1223,30 @@ for (k in 1:n_clusters) {
   # Set edge weights and labels
   E(g)$weight <- scales::rescale(
       edge_summary$avg_ratio,
-      to=c(0.25,1),
-      from = range(TE_results$TE_ratio[
-        TE_results$oro_type %in% concept_cluster_df$oro_type &
-          !is.na(TE_results$TE_ratio) &
-          is.finite(TE_results$TE_ratio)
-      ])
+      to=TE_scale_limits,
+      from = TE_ratio_range
       )
   E(g)$width <- 2
   E(g)$color <- scales::alpha(
-    ifelse(E(g)$avg_correlation >= 0, "#4dac26", "#d01c8b"),
+    ifelse(E(g)$avg_correlation >= 0, edge_col$positive, edge_col$negative),
     E(g)$weight
     )
   E(g)$sign <- edge_summary$sign
+  E(g)$label <- ifelse(
+    edge_summary$avg_dtw_lag > 0,
+    paste0("lag = ", ceiling(edge_summary$avg_dtw_lag), ", ", edge_summary$oro_types),
+    ""
+  )
 
+  ## Save outputs --
+  # edge_summary stats
+  edge_summary <- edge_summary %>%
+    mutate(group_name = cluster_name) %>%
+    relocate(group_name)
+  concept_meta_stats <- concept_meta_stats %>%
+    bind_rows(edge_summary)
   
+  # graph object
   concept_meta_graphs[[k]] <- g
   concept_cluster_names[[k]] <- paste(typeAES$label[match(types_in_cluster, typeAES$level)], collapse = ", ")
 }
@@ -1257,13 +1258,17 @@ for (k in 1:n_clusters) {
 
 ## Plot the networks of the oro types
 nodeTextSize <- 4 #3.5
-titleSize <- 14 #12
-labelSize <- 2.75
+titleSize <- 15 #12
+labelSize <- 3
+# range of TE ratios across all edges to set consistent edge transparency scaling across clusters
+TE_ratio_range <- range(TE_results$TE_ratio[TE_results$oro_type %in% concept_cluster_df$oro_type & !is.na(TE_results$TE_ratio) & is.finite(TE_results$TE_ratio)])
+# set limits for edge transparency scaling (rescaling TE ratios to this range for plotting)
+TE_scale_limits <- c(0.25, 1) # Adjust based on your TE_ratio range
 
 
 # Convert network to ggplot
 source(here::here("R/compute_negative_edge_dots.R"))
-
+source(here::here("R/functions_to_plot.R"))
 plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, end_cap_mult_factor=4) {
   
 
@@ -1302,14 +1307,15 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
         #                paste0("lag = ", scales::number(avg_dtw_lag, accuracy = 1)),
         #                paste0("lag = ", scales::number(avg_dtw_lag, accuracy = 1), ", ", oro_types)
         #                ),
-        label = paste0("lag = ",ceiling(avg_dtw_lag), ", ", oro_types), 
+        # label = paste0("lag = ",ceiling(avg_dtw_lag), ", ", oro_types), 
+        label = label,
         edge_color = color,
         filter = sign==1
       ),
       arrow = arrow(length = unit(7, 'mm')),
       end_cap = circle(end_cap_mm, 'mm'),
       label_dodge = unit(2, 'mm'),
-      label_push = unit(2, 'mm'),
+      label_push = unit(3, 'mm'),
       angle_calc = 'along',
       label_size=labelSize,
       show.legend = FALSE
@@ -1324,14 +1330,15 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
         #                paste0("lag = ", scales::number(avg_dtw_lag, accuracy = 1)),
         #                paste0("lag = ", scales::number(avg_dtw_lag, accuracy = 1), ", ", oro_types)
         #                ),
-        label = paste0("lag = ", ceiling(avg_dtw_lag), ", ", oro_types),
+        # label = paste0("lag = ", ceiling(avg_dtw_lag), ", ", oro_types),
+        label = label,
         edge_color = color,
         filter = sign==-1
       ),
       end_cap = circle(end_cap_mm, 'mm'),  # no arrow
       lineend = "round",   
       label_dodge = unit(2, 'mm'),
-      label_push = unit(2, 'mm'),
+      label_push = unit(3, 'mm'),
       angle_calc = 'along',
       label_size=labelSize,
       show.legend = FALSE
@@ -1342,7 +1349,7 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
       data = dot_positions,
       aes(x = dot_x, y = dot_y, size = 4*width, alpha = weight),
       shape = 21,             
-      fill = "#d01c8b",
+      fill = edge_col$negative,
       color="transparent",
       show.legend = FALSE
     ) +
@@ -1397,15 +1404,83 @@ concept_ggraph_plots_selected <- lapply(c(4,3,2), function(k) {
 
 # Arrange the ggraph plots horizontally according to cluster number
 final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2))
-final_plot_selected <- wrap_plots(concept_ggraph_plots_selected, nrow = 2, widths = c(1,1.2)) +
+final_plot_selected <- wrap_plots(concept_ggraph_plots_selected, nrow = 2, widths = c(1,1)) +
   plot_annotation(tag_levels = "a", tag_suffix = ")") 
 
 
+# Create a legend for the concept_ggraph_plots with custom symbols
+TE_scale_breaks <- pretty(TE_ratio_range, n = 3)
+
+
+# Create dummy data for custom legend
+legend_data <- data.frame(
+  x = 1:2,
+  y = 1:2,
+  edge_type = factor(c('Positive Edge', 'Negative Edge'), 
+                     levels = c('Positive Edge', 'Negative Edge'))
+)
+
+legend_plot <- ggplot(legend_data, aes(x = x, y = y, color = edge_type)) +
+  geom_point(data = subset(legend_data, edge_type == 'Positive Edge'),
+             size = 0.1, 
+             key_glyph = draw_key_arrow) +
+  geom_point(data = subset(legend_data, edge_type == 'Negative Edge'),
+             size = 0.1, 
+             key_glyph = draw_key_linepoint) +
+  scale_color_manual(
+    values = c('Positive Edge' = edge_col$positive, 'Negative Edge' = edge_col$negative),
+    name = "Edge Type"
+  ) +
+  guides(
+    color = guide_legend(
+      override.aes = list(
+        size = 3,
+        shape = c(NA, NA),
+        linetype = c(1, 1)
+      )
+    )
+  ) +
+  theme_void() +
+  theme(legend.position = 'right')
+
+# Create separate alpha legend
+alpha_legend_data <- data.frame(
+  x = 1:3,
+  y = 1:3,
+  alpha_val = seq(TE_scale_limits[1], TE_scale_limits[2], length.out = 3)
+)
+
+alpha_legend_plot <- ggplot(alpha_legend_data, aes(x = x, y = y, alpha = alpha_val)) +
+  geom_point(size = 4) +
+  scale_alpha_continuous(
+    range = TE_scale_limits,
+    breaks = seq(TE_scale_limits[1], TE_scale_limits[2], length.out = length(TE_scale_breaks)),
+    labels = TE_scale_breaks,
+    name = 'Mean TE Ratio'
+  ) +
+  theme_void() +
+  theme(legend.position = 'right')
+
+# Get just the legends
+edges_legend <- as_ggplot(ggpubr::get_legend(legend_plot))
+alpha_legend <- as_ggplot(ggpubr::get_legend(alpha_legend_plot))
+
+# Combine legends vertically
+combined_legends <- edges_legend / alpha_legend
+
+# add the legends to the left hand side of the combined plot without tags
+final_plot_legends <- (combined_legends | final_plot) + 
+  plot_layout(widths = c(0.2, 1)) 
+
+final_plot_selected_legends <- (combined_legends | final_plot_selected) + 
+  plot_layout(widths = c(0.2, 1))
 
 # Show or save
-ggsave(filename=here::here("figures/main/conceptual_cluster_networks.pdf"), final_plot, width = 10, height = 8)
-ggsave(filename=here::here("figures/main/conceptual_cluster_networks_selected.pdf"), final_plot_selected, width = 10, height = 8)
+ggsave(filename=here::here("figures/main/conceptual_cluster_networks.pdf"), final_plot_legends, width = 11, height = 8)
+ggsave(filename=here::here("figures/main/conceptual_cluster_networks_selected.pdf"), final_plot_selected_legends, width = 11, height = 8)
 
+## Save the excel of the edge summary stats for the meta networks
+writexl::write_xlsx(concept_meta_stats, here::here("outputs/concept_cluster_meta_network_edge_summary_stats.xlsx"))
 ```
 
 
@@ -1796,7 +1871,10 @@ ggsave(
 ```{r plot networks and qnm results for conceptual clusters}
 
 concept_ggraph_plots2 <- lapply(cluster_order, function(k) {
-  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], end_cap_mm = 10, end_cap_mult_factor=2.5)
+  plot_ggraph_network(concept_meta_graphs[[k]], k, concept_cluster_names2[[k]], end_cap_mm = 10, end_cap_mult_factor=2.5)+
+  theme(
+    plot.title = element_blank()
+  )
 })
 
 plotList <- c(
@@ -1808,17 +1886,35 @@ plotList <- c(
   
 )
 
-combined <- wrap_plots(plotList, ncol=3, byrow=TRUE,
-                       guides="collect", heights = c(1.6,1))+
-  plot_annotation(tag_levels = "a", tag_suffix = ")") &
-  theme(legend.position = "bottom",
-        legend.key.width = unit(0.6, "in"),
-        legend.title = element_text(margin = margin(r = 15)))
+# Create column headers as text grobs
+column_labels <- c("MRE", "Efficiency", "mCDR")
+header_plots <- lapply(column_labels, function(label) {
+  ggplot() + 
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, 
+             fill = "grey85", color = "grey20", linewidth = 0.5) +
+    annotate("text", x = 0.5, y = 0.5, label = label, size = 5, fontface = "bold") +
+    theme_void() +
+    theme(plot.margin = margin(0, 0, 0, 0))
+})
+
+# Combine headers with plots
+combined <- wrap_plots(
+  c(header_plots, plotList),
+  ncol = 3, 
+  byrow = TRUE,
+  heights = c(0.1, 1.6, 1)
+) +
+  plot_annotation(tag_levels = list(c("", "", "", "a)", "b)", "c)", "d)", "e)", "f)")))
+
+# Add custom legends for edge type and TE ratio to the left of the combined plot
+# Use wrap_elements on combined to preserve its tags
+combined_plots_legends <- (wrap_elements(combined) | wrap_elements(combined_legends)) + 
+  plot_layout(widths = c(1, 0.1))
 
 ggsave(
   here::here("figures/main/conceptual_networks_qnm.pdf"),
-  width=14, height=8, 
-  plot=combined
+  width=15, height=8, 
+  plot=combined_plots_legends
 )
 
 ```
@@ -2627,7 +2723,7 @@ allCountrySums <- allComponentDat_model_country %>%
 allCountrySums %>% filter(component %in% c("publications"), country_simple == "China")
 #   component    variable_name    country_simple y_total total y_percent
 #   <chr>        <chr>            <fct>            <dbl> <dbl>     <dbl>
-# 1 publications Publications (N) China            6454. 36410      17.7
+# 1 publications Publications (N) China            6454.  36410      17.7
 
 
 # Calculate overall proportions for country groups by ORO type
@@ -2741,8 +2837,8 @@ for(og in which(names(oro_groups)=="narrative")){
                      "Policy" = "Policy\nlog(N documents)",
                      "Legislation" = "Legislation\nlog(N documents)",
                      "Interest" = "Interest\nlog(N posts)",
-                     "Support" = "Support\nlog(N positive posts + likes)"
-                     # "Opposition" = "Opposition\nlog(N negative posts + likes)"
+                     "Support" = "Support\nlog(N positive posts x likes)"
+                     # "Opposition" = "Opposition\nlog(N negative posts x likes)"
                      )
     
     tmpDat <- tmpDat %>%
