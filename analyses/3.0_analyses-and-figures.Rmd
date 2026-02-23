@@ -504,6 +504,15 @@ ggsave(
 )
 
 
+## Save just the proportion plot 
+
+ggsave(
+  here::here("figures/supplemental/distribution_by_component_proportion.pdf"),
+  width = 5.5, height=6.5, 
+  plot = year_component_prop_ggp + 
+    theme(legend.title.position = "top",legend.title = element_text(hjust = 0.5))
+)
+
 ```
 
 
@@ -600,6 +609,40 @@ ggsave(
   plot = combined
 )
 ```
+
+
+```{r plot all dimension timeseries --except proportion -- together in multipanel figure - legend on bottom}
+## Plot only timeseries
+
+plotList <- list(
+  year_component_ggp+
+    ggtitle("a)")+
+    guides(fill = guide_legend(nrow=3))+
+    theme(
+          plot.margin = unit(rep(0.1, 4),"cm"),
+          legend.title.position = "top",
+          legend.title = element_text(hjust=0.5),
+          legend.text = element_text(size=8)
+          ),
+  allDep_ggp+
+    ggtitle("b)")+
+    theme(plot.margin = unit(rep(0.1, 4),"cm"))
+)
+
+
+combined <- wrap_plots(plotList,ncol = 2,
+                       widths = c(1.2,2)
+                       ) 
+
+
+## Save
+ggsave(
+  here::here("figures/main/distribution_by_component_alltimeseries_noProp.pdf"),
+  width=9, height=7,
+  plot = combined
+)
+```
+
 
 ## Drivers of spikes in deployment
 ```{r drivers of spikes in deployment for MRE and CCS}
