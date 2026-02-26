@@ -1163,7 +1163,8 @@ Visualize the aggregated meta-network where:
 require(ggraph)
 require(tidygraph)
 
-
+load(here::here("data/derived-data/TE_results.RData")) # TE_results, TE_results_summary
+load(here::here("data/derived-data/TE_dtw_lag_data.RData")) # edges_dtw_df
 
 ## Get diagraph objects for each defined cluster
 # Create a data.frame for lookup
@@ -1197,6 +1198,15 @@ n_clusters <- length(unique(concept_cluster_df$cluster))
 edge_col <- list(positive = "#4dac26", negative = "#d01c8b") # edge colors 
 concept_meta_graphs <- vector("list", n_clusters)
 concept_cluster_names <- vector("list", n_clusters)
+
+nodeTextSize <- 4 #3.5
+titleSize <- 15 #12
+labelSize <- 3
+# range of TE ratios across all edges to set consistent edge transparency scaling across clusters
+TE_ratio_range <- range(TE_results$TE_ratio[TE_results$oro_type %in% concept_cluster_df$oro_type & !is.na(TE_results$TE_ratio) & is.finite(TE_results$TE_ratio)])
+# set limits for edge transparency scaling (rescaling TE ratios to this range for plotting)
+TE_scale_limits <- c(0.25, 1) # Adjust based on your TE_ratio range
+
 # Data frame to hold summary stats for each edge in each cluster
 concept_meta_stats <- data.frame()
 
@@ -1300,13 +1310,6 @@ for (k in 1:n_clusters) {
 
 
 ## Plot the networks of the oro types
-nodeTextSize <- 4 #3.5
-titleSize <- 15 #12
-labelSize <- 3
-# range of TE ratios across all edges to set consistent edge transparency scaling across clusters
-TE_ratio_range <- range(TE_results$TE_ratio[TE_results$oro_type %in% concept_cluster_df$oro_type & !is.na(TE_results$TE_ratio) & is.finite(TE_results$TE_ratio)])
-# set limits for edge transparency scaling (rescaling TE ratios to this range for plotting)
-TE_scale_limits <- c(0.25, 1) # Adjust based on your TE_ratio range
 
 
 # Convert network to ggplot
@@ -1420,7 +1423,7 @@ plot_ggraph_network <- function(g, cluster_id, cluster_label, end_cap_mm = 10, e
                    color = "white"
                    ) +
 
-    labs(title = paste(cluster_label), tag = letters[cluster_id]) +
+    labs(title = paste(cluster_label), tag = paste0(letters[cluster_id],")")) +
     theme_void() +
     theme(
       plot.title = element_text(size = titleSize, hjust = 0.5),
@@ -1445,10 +1448,7 @@ concept_ggraph_plots_selected <- lapply(c(4,3,2), function(k) {
   labs(tag = "") # remove tag for selected version
 })
 
-# Arrange the ggraph plots horizontally according to cluster number
-final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2))
-final_plot_selected <- wrap_plots(concept_ggraph_plots_selected, nrow = 2, widths = c(1,1)) +
-  plot_annotation(tag_levels = "a", tag_suffix = ")") 
+
 
 
 # Create a legend for the concept_ggraph_plots with custom symbols
@@ -1511,9 +1511,20 @@ alpha_legend <- as_ggplot(ggpubr::get_legend(alpha_legend_plot))
 # Combine legends vertically
 combined_legends <- edges_legend / alpha_legend
 
+
+
+# Arrange the ggraph plots horizontally according to cluster number
+source(here::here("R/functions_to_plot.R"))
+final_plot <- wrap_plots(concept_ggraph_plots, nrow = 2, widths = c(1,1.2)) 
+  # plot_annotation(tag_levels = "a", tag_suffix = ")")
+
+final_plot_selected <- wrap_plots(concept_ggraph_plots_selected, nrow = 2, widths = c(1,1)) +
+  plot_annotation(tag_levels = "a", tag_suffix = ")") 
+
 # add the legends to the left hand side of the combined plot without tags
 final_plot_legends <- (combined_legends | final_plot) + 
-  plot_layout(widths = c(0.2, 1)) 
+  plot_layout(widths = c(0.2, 1))
+
 
 final_plot_selected_legends <- (combined_legends | final_plot_selected) + 
   plot_layout(widths = c(0.2, 1))
@@ -3077,4 +3088,120 @@ ggsave(
 
 ```
 
+
+```{r plot all time series and international policy moments, eval=FALSE}
+load(here::here("outputs/cutpointResults_mitigation_alloros.RData"))
+
+savePlot = FALSE
+
+oro_groups <- list(
+  "mCDR" = c("CDR-BioPump","CDR-BC","CDR-OAE"),
+  "MRE" = c("MRE-Ocean","MRE-Located","MRE-Bio"),
+  "Other"= c("CCS","Efficiency"),
+  "narrative" = c("MRE-Located", "CDR-OAE","Efficiency")
+)
+
+# ## View summary table of cutpoints
+# View(cutpoint_results %>% filter(oro_type %in% oro_groups$narrative) %>% pivot_wider(id_cols = c(oro_type, cp_id, component, variable_name), names_from = quantile, values_from = year))
+
+
+## Plot time series by group
+ggps <- vector("list", length(oro_groups))
+
+for(og in 1:length(oro_groups)){
+  
+  ggps[[og]] <- vector("list", length(oro_groups[[og]]))
+  
+  for(o in 1:length(oro_groups[[og]])){
+    # get data
+    tmpDat <- allComponentDat_model %>%
+      filter(oro_type == oro_groups[[og]][o], !is.na(year), component %in% selectedComponents) %>%
+      mutate(
+        y = ifelse(component %in% 
+                     c("deployment"), y, log(y))
+      )
+
+    
+    actionMetric <- tmpDat$variable_name[tmpDat$component == "deployment"][1]
+    facetLabels <- c("Action" = paste0("Action\n(", actionMetric, ")"),
+                     "Publications" = "Publications\nlog(N articles)",
+                     "Policy" = "Policy\nlog(N documents)",
+                     "Legislation" = "Legislation\nlog(N documents)",
+                     "Interest" = "Interest\nlog(N posts)",
+                     "Support" = "Support\nlog(N positive posts x Likes)"
+                     # "Opposition" = "Opposition\nlog(N negative posts + likes)"
+                     )
+    
+    tmpDat <- tmpDat %>%
+      mutate(
+        component_color = factor(component, levels = componentAES$level, labels = componentAES$colour),
+        component = factor(component, levels = componentAES$level, labels = componentAES$label)
+      ) %>%
+      mutate(
+        component = droplevels(component),
+        component_color = droplevels(component_color)
+      )%>%
+      mutate(
+        component = plyr::revalue(component, facetLabels)
+      )
+    
+    # Get cutpoints
+    changePointsQuantiles <- cutpoint_results %>%
+      filter(oro_type == oro_groups[[og]][o], component %in% selectedComponents) %>%
+      pivot_wider(names_from = quantile, values_from = year)%>%
+      mutate(iqr = `97.5%`-`2.5%`)%>%
+      filter(iqr < 5) %>%
+      select(-iqr)%>%
+      pivot_longer(cols = `2.5%`:`97.5%`, names_to = "quantile", values_to = "year") %>%
+      mutate(
+        component = factor(component, levels = componentAES$level, labels = componentAES$label)
+      ) %>%
+      mutate(
+        component = plyr::revalue(component, facetLabels)
+      )
+    
+    
+    ggp_tmp <- ggplot()+
+      
+      # geom_vline(data = changePointsQuantiles %>%filter(quantile %in% c("2.5%","97.5%")),
+      #          aes(xintercept=.data$year),
+      #          linewidth = 0.5, linetype = "dashed")+
+      geom_rect(data = changePointsQuantiles %>%filter(quantile %in% c("2.5%","97.5%")) %>% pivot_wider(names_from = "quantile", values_from = year),
+               aes(xmin=.data$`2.5%`, xmax=.data$`97.5%`),
+               ymin=-Inf, ymax=Inf,
+               fill="darkgrey", alpha=0.5)+
+      geom_line(data = tmpDat, aes(x=year, y=y, color=component_color))+
+      scale_x_continuous(limits = year_lim)+
+      scale_color_identity(guide="none")+
+      facet_wrap(vars(component),ncol=1, scales = "free_y")+
+      labs(
+        y="",
+        x="Year",
+        title = typeAES$label[match(oro_groups[[og]][o], typeAES$level)]
+      )+
+      theme_minimal(base_size = 10)+
+      theme(
+        plot.margin = unit(c(0.1, 0.1,0.1,0.1), units = "cm")
+      )
+    ggp_tmp
+    
+    ggps[[og]][[o]] <- ggp_tmp
+    
+      
+  }
+  
+  combined_patchwork <- wrap_plots(ggps[[og]], ncol = length(ggps[[og]])) +
+    plot_annotation(tag_levels = 'a', tag_suffix = ")")
+  
+  if(savePlot){
+    ggsave(here::here(paste0("figures/supplemental/allComponents_",names(oro_groups)[og],".pdf")),
+         combined_patchwork, width = 3*length(ggps[[og]]), height = 7)
+  }
+
+
+  
+}
+
+
+```
 

@@ -980,3 +980,4 @@ draw_key_linepoint <- function(data, params, size) {
     )
   ))
 }
+
